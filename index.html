@@ -38,7 +38,7 @@
         <div class="topBar">
           <div class="topBarLeft">
             <div class="titlePill">Top 25</div>
-            <div class="helperText">Click to play/stop. Shift+Click (or right-click) a tile to fix it.</div>
+            <div class="helperText">Click to play/stop. Shift+Click (or right-click) to paste an iTunes track link/ID and fix a tile.</div>
           </div>
 
           <div class="topBarRight">
@@ -47,14 +47,13 @@
           </div>
         </div>
 
-        <!-- Floating stage -->
+        <!-- Full-page floating stage -->
         <div id="stage" class="stage"></div>
 
         <div id="toast" class="toast hidden"></div>
       </section>
     </main>
 
-    <!-- Hidden audio -->
     <audio id="audio" preload="none"></audio>
 
     <!-- Fix modal -->
@@ -67,12 +66,12 @@
 
         <div class="modalBody">
           <div class="modalRow">
-            <input id="fixQuery" class="modalInput" placeholder="Search iTunes… (track + artist)" />
-            <button id="fixSearchBtn" class="btn">Search</button>
+            <input id="fixQuery" class="modalInput" placeholder="Paste iTunes track URL (with ?i=123...) or a numeric trackId" />
+            <button id="fixSearchBtn" class="btn">Apply</button>
           </div>
 
           <div class="modalHint" id="fixHint"></div>
-          <div id="fixResults" class="results"></div>
+          <div id="fixResults" style="display:none;"></div>
         </div>
       </div>
     </div>
