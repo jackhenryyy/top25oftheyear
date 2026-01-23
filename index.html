@@ -37,19 +37,20 @@
       <section class="showcase hidden" id="showcase">
         <div class="topBar">
           <div class="topBarLeft">
-            <div class="titlePill">Songs</div>
-            <div class="helperText">Click a cover to play/stop. Shift+Click (or right-click) a tile to fix it.</div>
+            <div class="titlePill">Top 25</div>
+            <div class="helperText">Click a cover to play. Click it again to stop.</div>
           </div>
-
           <div class="topBarRight">
             <button id="copyLinkBtn" class="btn btn--ghost">Copy Share Link</button>
             <button id="backBtn" class="btn btn--ghost">Back to Upload</button>
           </div>
         </div>
 
-        <div class="mosaicWrap">
-          <div id="grid" class="pyramid"></div>
-        </div>
+        <!-- Grid for songs -->
+        <div id="grid" class="grid"></div>
+
+        <!-- Song Name Display (added here) -->
+        <div id="songNameDisplay" class="song-name-display"></div>
 
         <div id="toast" class="toast hidden"></div>
       </section>
@@ -57,25 +58,6 @@
 
     <!-- Hidden audio for autoplay previews -->
     <audio id="audio" preload="none"></audio>
-
-    <!-- Fix modal -->
-    <div id="fixModal" class="modal hidden" aria-hidden="true">
-      <div class="modalCard">
-        <div class="modalTop">
-          <div class="modalTitle" id="fixTitle">Fix Track</div>
-          <button id="closeFixBtn" class="xBtn" type="button">✕</button>
-        </div>
-
-        <div class="modalBody">
-          <div class="modalRow">
-            <input id="fixQuery" class="modalInput" placeholder="Paste iTunes track URL (with ?i=123...) or a numeric trackId" />
-            <button id="fixApplyBtn" class="btn">Apply</button>
-          </div>
-
-          <div class="modalHint" id="fixHint"></div>
-        </div>
-      </div>
-    </div>
 
     <script src="./app.js"></script>
   </body>
