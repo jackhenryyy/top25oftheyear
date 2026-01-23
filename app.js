@@ -94,7 +94,7 @@ function norm(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-async function itunesSearch(term, limit = 15) {
+async function itunesSearch(term, limit = 1) {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=album&limit=${limit}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`iTunes search failed (${resp.status})`);
@@ -104,7 +104,7 @@ async function itunesSearch(term, limit = 15) {
 
 async function lookupBest(q) {
   const artist = (q.artist || "").split(",")[0].trim();
-  const term = q.album ? `${q.track} ${artist} ${q.album}` : `${q.track} ${artist}`;
+  const term = `${q.track} ${artist} ${q.album}`;
   const results = await itunesSearch(term, 1); // Get the top result only
   if (!results.length) return null;
 
@@ -120,10 +120,9 @@ async function lookupBest(q) {
 // ---- Function to handle album tile clicks ----
 async function handleAlbumClick(albumIndex) {
   const albumTile = els.albumTiles[albumIndex];
-  const albumName = `Album ${albumIndex + 1}`; // Placeholder name, can be customized
 
   // Searching for the album based on the index
-  const result = await lookupBest({ track: albumName, artist: "Unknown" });
+  const result = await lookupBest({ track: "Unknown", artist: "Unknown", album: `Album ${albumIndex + 1}` });
 
   if (result) {
     albumTile.style.backgroundImage = `url(${result.artworkUrl})`;
@@ -139,20 +138,7 @@ els.albumTiles.forEach((tile, index) => {
   tile.addEventListener("click", () => handleAlbumClick(index));
 });
 
-// ---- Session ----
-function saveSession(queries) {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(queries));
-}
-function loadSession() {
-  const raw = sessionStorage.getItem(SESSION_KEY);
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch { return null; }
-}
-function clearSession() {
-  sessionStorage.removeItem(SESSION_KEY);
-}
-
-// ---- CSV parsing ----
+// ---- CSV Parsing ----
 function readFileAsText(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -223,7 +209,25 @@ function extractTop25QueriesFromCSV(csvText) {
   return out.slice(0, 25);
 }
 
-// ---- Build ----
+// ---- Showcase Building ----
+async function buildShowcase(queries) {
+  // Implement the showcase rendering logic here
+  setMode("showcase");
+  showToast("Loading…");
+  const resolved = await Promise.all(
+    queries.map(async (q) => {
+      try {
+        return (await lookupBest(q)) || {};
+      } catch {
+        return {};
+      }
+    })
+  );
+  tracks = resolved.slice(0, 25);
+  showToast("Ready.");
+}
+
+// ---- Handle Build Button Click ----
 async function handleBuildClick() {
   console.log("[Top25] Build clicked");
   try {
@@ -244,23 +248,19 @@ async function handleBuildClick() {
   }
 }
 
-// ---- Reset ----
 function handleReset() {
   stopAudio();
   els.csvFile.value = "";
-  clearSession();
   setMode("import");
   els.grid.innerHTML = "";
   setStatus("");
 }
 
-// ---- Back ----
 function handleBack() {
   stopAudio();
   setMode("import");
 }
 
-// ---- Wire ----
 function wire() {
   els.buildBtn.addEventListener("click", handleBuildClick);
   els.resetBtn.addEventListener("click", handleReset);
