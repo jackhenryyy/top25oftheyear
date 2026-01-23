@@ -30,15 +30,15 @@ const els = {
   fixHint: mustGet("fixHint"),
 };
 
-const STORAGE_KEY = "top25_queries_v6";
+const SESSION_KEY = "top25_queries_v7";
 const TOAST_MS = 1600;
 
-let tracks = []; // 1..25 meta objects
+let tracks = []; // length 25, index = rank-1
 let fixingRank = null;
 
 let currentPlaying = { rank: null, tile: null };
 
-// ---------- UI ----------
+// ---------------- UI helpers ----------------
 function setStatus(msg) {
   els.status.textContent = msg || "";
   console.log("[Top25] status:", msg || "");
@@ -84,20 +84,20 @@ function togglePlay(rank, previewUrl, tile) {
   showToast(`Playing #${rank}`);
 }
 
-// ---------- Session ----------
+// ---------------- session ----------------
 function saveSession(queries) {
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(queries));
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(queries));
 }
 function loadSession() {
-  const raw = sessionStorage.getItem(STORAGE_KEY);
+  const raw = sessionStorage.getItem(SESSION_KEY);
   if (!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
 function clearSession() {
-  sessionStorage.removeItem(STORAGE_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
-// ---------- CSV parsing ----------
+// ---------------- CSV parse ----------------
 function readFileAsText(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -133,6 +133,7 @@ function parseCSV(text) {
       row = [];
       continue;
     }
+
     cell += ch;
   }
 
@@ -145,16 +146,15 @@ function extractTop25QueriesFromCSV(csvText) {
   const rows = parseCSV(csvText);
   if (!rows.length) return [];
 
-  const headerRaw = rows[0].map(h => String(h || ""));
-  const header = headerRaw.map(h => h.replace(/\uFEFF/g,"").trim().toLowerCase());
+  const header = rows[0].map(h => String(h || "").replace(/\uFEFF/g,"").trim().toLowerCase());
 
-  const findCol = (pred) => header.findIndex(pred);
+  const col = (pred) => header.findIndex(pred);
 
-  const trackIdx = findCol(h => h === "track name" || h.includes("track name"));
-  const artistIdx = findCol(h =>
+  const trackIdx = col(h => h === "track name" || h.includes("track name"));
+  const artistIdx = col(h =>
     h === "artist name(s)" || h === "artist name" || (h.includes("artist") && h.includes("name"))
   );
-  const albumIdx = findCol(h => h === "album name" || h.includes("album name"));
+  const albumIdx = col(h => h === "album name" || h.includes("album name"));
 
   if (trackIdx === -1 || artistIdx === -1) return [];
 
@@ -169,7 +169,7 @@ function extractTop25QueriesFromCSV(csvText) {
   return out.slice(0, 25);
 }
 
-// ---------- iTunes lookup ----------
+// ---------------- iTunes matching ----------------
 function norm(s) {
   return String(s || "")
     .toLowerCase()
@@ -235,7 +235,7 @@ function scoreResult(q, r) {
   return s;
 }
 
-async function itunesSearch(term, limit = 15) {
+async function itunesSearch(term, limit = 18) {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=${limit}`;
   const resp = await fetch(url);
   if (!resp.ok) throw new Error(`iTunes search failed (${resp.status})`);
@@ -254,16 +254,17 @@ async function itunesLookupByIds(ids) {
 
 async function lookupITunesBest(q) {
   const primaryArtist = (q.artist || "").split(",")[0].trim();
+
   const term1 = q.album ? `${q.track} ${primaryArtist} ${q.album}` : `${q.track} ${primaryArtist}`;
-  let results = await itunesSearch(term1, 15);
+  let results = await itunesSearch(term1, 18);
 
   if (!results.length || scoreResult(q, results[0]) < 18) {
-    const more = await itunesSearch(`${q.track} ${primaryArtist}`, 15);
+    const more = await itunesSearch(`${q.track} ${primaryArtist}`, 18);
     results = results.concat(more);
   }
 
   if (q.album) {
-    const more = await itunesSearch(`${q.track} ${q.album}`, 15);
+    const more = await itunesSearch(`${q.track} ${q.album}`, 18);
     results = results.concat(more);
   }
 
@@ -291,7 +292,7 @@ async function lookupITunesBest(q) {
   };
 }
 
-// ---------- Share links (base36 IDs) ----------
+// ---------------- Share links (base36 IDs) ----------------
 function toBase36(n){ return Number(n).toString(36); }
 function fromBase36(s){ return parseInt(s, 36); }
 
@@ -319,11 +320,12 @@ async function copyShareLinkFromCurrentTracks() {
   await navigator.clipboard.writeText(url);
   showToast("Share link copied.");
 }
-// ---------- Pyramid rows builder ----------
+
+// ---------------- Pyramid rows builder ----------------
 function buildDiamondRows(total = 25) {
   // Center row: [1]
-  // Then alternating ABOVE / BELOW with row sizes 2,2,3,3,4,4,...
-  // Special rule: if the very last row would be a single item, merge it into the last bottom row.
+  // Above: [2,3], Below: [4,5], Above: [6,7,8], Below: [9,10,11] ...
+  // Merge a final single leftover into the last bottom row.
 
   const above = [];
   const below = [];
@@ -344,52 +346,30 @@ function buildDiamondRows(total = 25) {
 
     placeAbove = !placeAbove;
 
-    // increase size after we’ve placed both an above & a below row of this size
     if (placeAbove) size += 1;
   }
 
-  // If the last bottom row is a single leftover, merge it into the previous bottom row
+  // If the last bottom row is [single], merge into previous bottom row
   if (below.length >= 2) {
     const last = below[below.length - 1];
     const prev = below[below.length - 2];
     if (last.length === 1) {
-      prev.push(last[0]);
+      prev.push(last[0]); // now becomes 5
       below.pop();
     }
   }
 
-  // Render order top→bottom: reverse(above) + center + below
   return [...above.reverse(), [1], ...below];
 }
 
-  // Center row: [1]
-  // Then alternating ABOVE / BELOW with row sizes 2,2,3,3,4,4,...
-  const center = [[1]];
-  const above = [];
-  const below = [];
-
-  let rank = 2;
-  let size = 2;
-  let placeAbove = true;
-
-  while (rank <= total) {
-    const remaining = total - rank + 1;
-    const take = Math.min(size, remaining);
-
-    const row = [];
-    for (let i = 0; i < take; i++) row.push(rank++);
-
-    if (placeAbove) above.push(row);
-    else below.push(row);
-
-    placeAbove = !placeAbove;
-
-    // increase size after we’ve placed both an above & a below row of this size
-    if (placeAbove) size += 1;
-  }
-
-  // Render order top→bottom: reverse(above) + center + below
-  return [...above.reverse(), ...center, ...below];
+// Row-based scaling: bigger near the center, smaller as rows move away.
+// Also: "rows with two need to be closer in size to #1" => use gentle drop for first 2 rows.
+function rowScale(rowIndexFromCenter) {
+  // rowIndexFromCenter: 0 = center row, 1 = immediate neighbor, 2 = next, ...
+  // Gentle drop early, then more drop later.
+  const curve = [1.00, 0.92, 0.84, 0.76, 0.70, 0.64, 0.60, 0.56, 0.52];
+  const idx = Math.min(rowIndexFromCenter, curve.length - 1);
+  return curve[idx];
 }
 
 function createTile(rank, meta) {
@@ -413,7 +393,7 @@ function createTile(rank, meta) {
   tile.addEventListener("click", (evt) => {
     if (evt.shiftKey) { openFixModal(rank); return; }
     if (!meta.previewUrl) {
-      showToast(`#${rank}: missing preview. Shift+Click to paste iTunes link/ID.`);
+      showToast(`#${rank}: missing preview. Shift+Click to fix.`);
       return;
     }
     togglePlay(rank, meta.previewUrl, tile);
@@ -433,9 +413,22 @@ function renderPyramid() {
 
   const rows = buildDiamondRows(25);
 
-  for (const rowRanks of rows) {
+  // find center row index (the row that equals [1])
+  const centerIdx = rows.findIndex(r => r.length === 1 && r[0] === 1);
+  const maxDist = Math.max(centerIdx, rows.length - 1 - centerIdx);
+
+  rows.forEach((rowRanks, idx) => {
     const rowEl = document.createElement("div");
     rowEl.className = "pyrRow";
+
+    // scale based on distance from center
+    const dist = Math.abs(idx - centerIdx);
+    const scale = rowScale(dist);
+
+    rowEl.style.setProperty("--rowScale", String(scale));
+    // Apply scaling to row via transform so items shrink together and stay centered
+    rowEl.style.transform = `scale(${scale})`;
+    rowEl.style.transformOrigin = "center center";
 
     for (const r of rowRanks) {
       const meta = tracks[r - 1];
@@ -443,10 +436,10 @@ function renderPyramid() {
     }
 
     els.grid.appendChild(rowEl);
-  }
+  });
 }
 
-// ---------- Fix modal ----------
+// ---------------- Fix modal ----------------
 function extractTrackId(input) {
   const s = String(input || "").trim();
   if (!s) return null;
@@ -517,12 +510,12 @@ async function applyFixFromPaste() {
   }
 }
 
-// ---------- Build ----------
+// ---------------- Build ----------------
 async function buildShowcase(queries) {
   stopAudio();
   els.grid.innerHTML = "";
 
-  // Keep this if you want #1 = last in playlist.
+  // Keep this if you want #1 = last in playlist
   const reversed = [...queries].reverse();
 
   saveSession(queries);
@@ -565,20 +558,25 @@ async function buildShowcase(queries) {
 }
 
 async function handleBuildClick() {
-  const file = els.csvFile.files?.[0];
-  if (!file) { setStatus("Upload your CSV first."); return; }
+  try {
+    const file = els.csvFile.files?.[0];
+    if (!file) { setStatus("Upload your CSV first."); return; }
 
-  setStatus("Reading CSV…");
-  const text = await readFileAsText(file);
-  const queries = extractTop25QueriesFromCSV(text);
+    setStatus("Reading CSV…");
+    const text = await readFileAsText(file);
+    const queries = extractTop25QueriesFromCSV(text);
 
-  if (!queries.length) {
-    setStatus("Could not parse Track Name + Artist Name(s) from this CSV.");
-    return;
+    if (!queries.length) {
+      setStatus("Could not parse Track Name + Artist Name(s) from this CSV.");
+      return;
+    }
+
+    setStatus("");
+    await buildShowcase(queries);
+  } catch (e) {
+    console.error(e);
+    setStatus(String(e?.message || e));
   }
-
-  setStatus("");
-  await buildShowcase(queries);
 }
 
 function handleReset() {
@@ -597,11 +595,15 @@ function handleBack() {
   setMode("import");
 }
 
-// ---------- Events / init ----------
+// ---------------- Events / init ----------------
 function wireEvents() {
-  els.buildBtn.addEventListener("click", () => {
-    handleBuildClick().catch(e => setStatus(String(e?.message || e)));
-  });
+  // Prevent double-binding bugs
+  els.buildBtn.onclick = null;
+  els.resetBtn.onclick = null;
+  els.backBtn.onclick = null;
+  els.copyLinkBtn.onclick = null;
+
+  els.buildBtn.addEventListener("click", () => handleBuildClick());
   els.resetBtn.addEventListener("click", handleReset);
   els.backBtn.addEventListener("click", handleBack);
 
@@ -627,6 +629,7 @@ function wireEvents() {
 (async function init() {
   wireEvents();
 
+  // load from share link if present
   const idsFromHash = decodeIdsFromHash();
   if (idsFromHash?.length) {
     setMode("showcase");
@@ -656,6 +659,7 @@ function wireEvents() {
     return;
   }
 
+  // resume from session
   const saved = loadSession();
   if (saved?.length) {
     setStatus("");
