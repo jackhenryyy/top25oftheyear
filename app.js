@@ -170,28 +170,68 @@ function extractTop25QueriesFromCSV(csvText) {
   return out.slice(0, 25);
 }
 
-function extractTop10AlbumQueriesFromCSV(csvText) {
-  const rows = parseCSV(csvText);
-  if (!rows.length) return [];
+// ---- iTunes search function ----
+async function itunesSearch(term, limit = 15) {
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=${limit}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`iTunes search failed (${resp.status})`);
+  const data = await resp.json();
+  return data.results || [];
+}
 
-  const header = rows[0].map(h => String(h || "").replace(/\uFEFF/g,"").trim().toLowerCase());
-  const findCol = (pred) => header.findIndex(pred);
+function score(q, r) {
+  const qt = norm(q.track);
+  const qa = norm((q.artist || "").split(",")[0]);
+  const qalb = norm(q.album);
 
-  const albumIdx = findCol(h => h === "album name" || h.includes("album name"));
-  const artistIdx = findCol(h =>
-    h === "artist name(s)" || h === "artist name" || (h.includes("artist") && h.includes("name"))
-  );
+  const rt = norm(r.trackName);
+  const ra = norm(r.artistName);
+  const ralb = norm(r.collectionName);
 
-  if (albumIdx === -1 || artistIdx === -1) return [];
+  let s = 0;
+  if (rt === qt) s += 20;
+  if (rt.includes(qt)) s += 10;
+  if (ra.includes(qa)) s += 14;
 
-  const out = [];
-  for (let r = 1; r < rows.length; r++) {
-    const cells = rows[r] || [];
-    const album = String(cells[albumIdx] || "").trim();
-    const artist = String(cells[artistIdx] || "").trim();
-    if (album && artist) out.push({ album, artist });
+  if (qalb) {
+    if (ralb === qalb) s += 18;
+    if (ralb.includes(qalb) || qalb.includes(ralb)) s += 10;
   }
-  return out.slice(0, 10);
+
+  const c = norm(r.collectionName);
+  if (c.includes("dj mix")) s -= 40;
+  if (c.includes("mix")) s -= 10;
+
+  const ct = String(r.collectionType || "").toLowerCase();
+  if (ct === "album") s += 10;
+
+  return s;
+}
+
+async function lookupBest(q) {
+  const artist = (q.artist || "").split(",")[0].trim();
+  const term = q.album ? `${q.track} ${artist} ${q.album}` : `${q.track} ${artist}`;
+  const results = await itunesSearch(term, 18);
+  if (!results.length) return null;
+
+  let best = results[0];
+  let bestS = score(q, best);
+  for (const r of results) {
+    const sc = score(q, r);
+    if (sc > bestS) { best = r; bestS = sc; }
+  }
+
+  const artwork = (best.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
+
+  return {
+    trackId: best.trackId || null,
+    trackName: best.trackName || q.track,
+    artistName: best.artistName || q.artist,
+    albumName: best.collectionName || q.album,
+    artworkUrl: artwork || best.artworkUrl100 || "",
+    previewUrl: best.previewUrl || null,
+    trackViewUrl: best.trackViewUrl || null,
+  };
 }
 
 // ---- Diamond rows with “merge last single into bottom row” ----
@@ -296,7 +336,6 @@ async function copyShareLink() {
 
 // ---- Build ----
 async function buildShowcase(queries) {
-  // reverse so #1 = last in playlist (your preference)
   const reversed = [...queries].reverse();
 
   saveSession(queries);
@@ -319,7 +358,6 @@ async function buildShowcase(queries) {
 }
 
 async function handleBuildClick() {
-  console.log("[Top25] Build clicked");
   try {
     const file = els.csvFile.files?.[0];
     if (!file) { setStatus("Upload your CSV first."); return; }
