@@ -34,26 +34,18 @@ const els = {
   fixQuery: opt("fixQuery"),
   fixApplyBtn: opt("fixApplyBtn"),
   fixHint: opt("fixHint"),
-
-  songNameDisplay: req("songNameDisplay"), // Display song name while playing
 };
 
 // ---- Global state ----
-let tracks = []; // Top 25 songs (1..25)
-let albums = []; // Top 10 albums
+let tracks = [];
 let fixingRank = null;
 
 let currentPlaying = { rank: null, tile: null };
 
-// ---- Session ----
 const SESSION_KEY = "top25_queries_v8";
 const TOAST_MS = 1500;
 
-// ---- Session helpers ----
-function saveSession(queries) {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(queries));
-}
-
+// ---- UI helpers ----
 function setStatus(msg) {
   els.status.textContent = msg || "";
   console.log("[Top25] status:", msg || "");
@@ -82,9 +74,8 @@ function stopAudio() {
   els.audio.src = "";
   if (currentPlaying.tile) currentPlaying.tile.classList.remove("playing");
   currentPlaying = { rank: null, tile: null };
-  els.songNameDisplay.textContent = ""; // Hide song name when stopped
 }
-function togglePlay(rank, previewUrl, tile, trackName) {
+function togglePlay(rank, previewUrl, tile) {
   if (currentPlaying.rank === rank) {
     stopAudio();
     showToast(`Stopped #${rank}`);
@@ -96,7 +87,19 @@ function togglePlay(rank, previewUrl, tile, trackName) {
   els.audio.src = previewUrl;
   els.audio.play().catch(() => {});
   showToast(`Playing #${rank}`);
-  els.songNameDisplay.textContent = trackName; // Show song name
+}
+
+// ---- Session ----
+function saveSession(queries) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(queries));
+}
+function loadSession() {
+  const raw = sessionStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+function clearSession() {
+  sessionStorage.removeItem(SESSION_KEY);
 }
 
 // ---- CSV parsing ----
@@ -170,7 +173,11 @@ function extractTop25QueriesFromCSV(csvText) {
   return out.slice(0, 25);
 }
 
-// ---- iTunes search function ----
+// ---- iTunes search ----
+function norm(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 async function itunesSearch(term, limit = 15) {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=${limit}`;
   const resp = await fetch(url);
@@ -300,7 +307,7 @@ function createTile(rank, meta) {
       showToast(`#${rank}: no preview`);
       return;
     }
-    togglePlay(rank, meta.previewUrl, tile, meta.trackName);
+    togglePlay(rank, meta.previewUrl, tile);
   });
 
   return tile;
@@ -336,6 +343,7 @@ async function copyShareLink() {
 
 // ---- Build ----
 async function buildShowcase(queries) {
+  // reverse so #1 = last in playlist (your preference)
   const reversed = [...queries].reverse();
 
   saveSession(queries);
@@ -358,6 +366,7 @@ async function buildShowcase(queries) {
 }
 
 async function handleBuildClick() {
+  console.log("[Top25] Build clicked");
   try {
     const file = els.csvFile.files?.[0];
     if (!file) { setStatus("Upload your CSV first."); return; }
