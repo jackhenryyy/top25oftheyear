@@ -1,6 +1,5 @@
 console.log("[Top25] app.js loaded");
 
-// ---------- DOM ----------
 const $ = (id) => document.getElementById(id);
 
 const els = {
@@ -17,31 +16,31 @@ const els = {
   audio: $("audio"),
   toast: $("toast"),
 
+  // modal elements from your existing HTML
   fixModal: $("fixModal"),
   closeFixBtn: $("closeFixBtn"),
   fixTitle: $("fixTitle"),
-  fixQuery: $("fixQuery"),
-  fixSearchBtn: $("fixSearchBtn"),
+  fixQuery: $("fixQuery"),         // now used to paste iTunes link or ID
+  fixSearchBtn: $("fixSearchBtn"), // now used as "Apply"
   fixHint: $("fixHint"),
-  fixResults: $("fixResults"),
+  fixResults: $("fixResults"),     // unused (we’ll hide)
 };
 
-const STORAGE_KEY = "top25_queries_v3";
-const TOAST_MS = 1800;
+const STORAGE_KEY = "top25_queries_v4";
+const TOAST_MS = 1600;
 
-// ---------- State ----------
-let queriesSession = null;            // original CSV parsed queries (25)
-let tracks = [];                      // resolved iTunes metas in rank order (1..25)
-let bubbles = [];                     // physics objects
+let queriesSession = null;
+let tracks = [];     // rank order (1..25)
+let bubbles = [];
 let rafId = null;
 
 let currentPlaying = { rank: null, tile: null };
 
 let cursor = { x: 0, y: 0, active: false };
 
-let fixingRank = null;               // which rank is being manually fixed
+let fixingRank = null;
 
-// ---------- UI helpers ----------
+// ---------- UI ----------
 function setStatus(msg) {
   els.status.textContent = msg || "";
   console.log("[Top25] status:", msg || "");
@@ -79,11 +78,9 @@ function togglePlay(rank, previewUrl, tile) {
     showToast(`Stopped #${rank}`);
     return;
   }
-
   stopAudio();
   currentPlaying = { rank, tile };
   tile.classList.add("playing");
-
   els.audio.src = previewUrl;
   els.audio.play().catch(() => {});
   showToast(`Playing #${rank}`);
@@ -137,7 +134,6 @@ function parseCSV(text) {
       row = [];
       continue;
     }
-
     cell += ch;
   }
 
@@ -161,10 +157,7 @@ function extractTop25QueriesFromCSV(csvText) {
   );
   const albumIdx = findCol(h => h === "album name" || h.includes("album name"));
 
-  if (trackIdx === -1 || artistIdx === -1) {
-    console.warn("[Top25] header row:", headerRaw);
-    return [];
-  }
+  if (trackIdx === -1 || artistIdx === -1) return [];
 
   const out = [];
   for (let r = 1; r < rows.length; r++) {
@@ -177,7 +170,7 @@ function extractTop25QueriesFromCSV(csvText) {
   return out.slice(0, 25);
 }
 
-// ---------- iTunes matching (album-first) ----------
+// ---------- iTunes lookup ----------
 function norm(s) {
   return String(s || "")
     .toLowerCase()
@@ -191,33 +184,28 @@ function norm(s) {
 function penaltyForBadCollection(name) {
   const n = norm(name);
   let p = 0;
-  // strongly penalize mixes/playlists/collections that often show up as "DJ Mix"
-  if (n.includes("dj mix")) p -= 30;
-  if (n.includes("mix")) p -= 10;
-  if (n.includes("radio")) p -= 8;
-  if (n.includes("playlist")) p -= 20;
-  if (n.includes("karaoke") || n.includes("tribute")) p -= 40;
+  if (n.includes("dj mix")) p -= 40;
+  if (n.includes("mix")) p -= 12;
+  if (n.includes("playlist")) p -= 30;
+  if (n.includes("karaoke") || n.includes("tribute")) p -= 50;
   return p;
 }
 
 function bonusForAlbumCollection(r) {
-  // iTunes has collectionType sometimes; if present and "Album", boost
   const ct = String(r.collectionType || "").toLowerCase();
   let b = 0;
   if (ct === "album") b += 10;
-  // prefer album tracks with a trackNumber
-  if (typeof r.trackNumber === "number") b += 4;
+  if (typeof r.trackNumber === "number") b += 3;
   return b;
 }
 
 function bonusAgainstSingles(q, r) {
-  // If the query album exists and result collection name matches, boost.
   const qa = norm(q.album);
   if (!qa) return 0;
   const ra = norm(r.collectionName);
   if (!ra) return 0;
-  if (ra === qa) return 14;
-  if (ra.includes(qa) || qa.includes(ra)) return 9;
+  if (ra === qa) return 16;
+  if (ra.includes(qa) || qa.includes(ra)) return 10;
   return 0;
 }
 
@@ -231,23 +219,16 @@ function scoreResult(q, r) {
   const rAlbum = norm(r.collectionName);
 
   let s = 0;
-
-  // Track match
   if (rTrack === qTrack) s += 14;
   if (rTrack.includes(qTrack)) s += 8;
-  if (qTrack.includes(rTrack)) s += 4;
-
-  // Artist match
   if (rArtist === qArtist) s += 14;
   if (rArtist.includes(qArtist)) s += 10;
 
-  // Album match (big)
   if (qAlbum) {
     if (rAlbum === qAlbum) s += 18;
     if (rAlbum.includes(qAlbum) || qAlbum.includes(rAlbum)) s += 12;
   }
 
-  // Prefer album collections, penalize mixes/playlists
   s += bonusForAlbumCollection(r);
   s += bonusAgainstSingles(q, r);
   s += penaltyForBadCollection(r.collectionName);
@@ -263,24 +244,27 @@ async function itunesSearch(term, limit = 15) {
   return (data.results || []);
 }
 
+async function itunesLookupByIds(ids) {
+  if (!ids.length) return [];
+  const url = `https://itunes.apple.com/lookup?id=${ids.join(",")}&entity=song`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`iTunes lookup failed (${resp.status})`);
+  const data = await resp.json();
+  return (data.results || []).filter(r => r.wrapperType === "track");
+}
+
 async function lookupITunesBest(q) {
   const primaryArtist = (q.artist || "").split(",")[0].trim();
-
-  // First pass: track + artist + album
   const term1 = q.album ? `${q.track} ${primaryArtist} ${q.album}` : `${q.track} ${primaryArtist}`;
   let results = await itunesSearch(term1, 15);
 
-  // Second pass: track + artist (more recall)
-  if (!results.length || (results.length && scoreResult(q, results[0]) < 18)) {
-    const term2 = `${q.track} ${primaryArtist}`;
-    const more = await itunesSearch(term2, 15);
+  if (!results.length || scoreResult(q, results[0]) < 18) {
+    const more = await itunesSearch(`${q.track} ${primaryArtist}`, 15);
     results = results.concat(more);
   }
 
-  // Third pass: track + album (sometimes artist string mismatches)
   if (q.album) {
-    const term3 = `${q.track} ${q.album}`;
-    const more = await itunesSearch(term3, 15);
+    const more = await itunesSearch(`${q.track} ${q.album}`, 15);
     results = results.concat(more);
   }
 
@@ -288,7 +272,6 @@ async function lookupITunesBest(q) {
 
   let best = results[0];
   let bestScore = scoreResult(q, best);
-
   for (const r of results) {
     const sc = scoreResult(q, r);
     if (sc > bestScore) { best = r; bestScore = sc; }
@@ -297,76 +280,56 @@ async function lookupITunesBest(q) {
   const artwork = (best.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
 
   return {
+    trackId: best.trackId || null,
     trackName: best.trackName || q.track,
     artistName: best.artistName || q.artist,
     albumName: best.collectionName || q.album,
     artworkUrl: artwork || best.artworkUrl100 || "",
     previewUrl: best.previewUrl || null,
     trackViewUrl: best.trackViewUrl || null,
-    collectionViewUrl: best.collectionViewUrl || null,
     score: bestScore,
     raw: best,
   };
 }
 
-// ---------- Overlay contrast ----------
-async function computeLuminance(imgEl) {
-  const w = 32, h = 32;
-  const canvas = document.createElement("canvas");
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(imgEl, 0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h).data;
+// ---------- Share link v2: short IDs ----------
+function toBase36(n){ return Number(n).toString(36); }
+function fromBase36(s){ return parseInt(s, 36); }
 
-  let r = 0, g = 0, b = 0, n = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const a = data[i + 3];
-    if (a < 10) continue;
-    r += data[i]; g += data[i + 1]; b += data[i + 2];
-    n++;
-  }
-  if (!n) return 0.5;
-  r /= n; g /= n; b /= n;
-  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+function encodeIdsToHash(trackIds) {
+  // base36 IDs joined by "."
+  return `#ids=${trackIds.map(toBase36).join(".")}`;
 }
 
-// ---------- Share link ----------
-function encodeListToHash(queries) {
-  const compact = queries.map(q => ({ t: q.track, a: q.artist, al: q.album || "" }));
-  const json = JSON.stringify(compact);
-  const b64 = btoa(unescape(encodeURIComponent(json)));
-  return `#list=${b64}`;
-}
-function decodeListFromHash() {
+function decodeIdsFromHash() {
   const hash = window.location.hash || "";
-  if (!hash.startsWith("#list=")) return null;
-  const b64 = hash.slice("#list=".length);
-  try {
-    const json = decodeURIComponent(escape(atob(b64)));
-    const compact = JSON.parse(json);
-    if (!Array.isArray(compact)) return null;
-    return compact.slice(0, 25)
-      .map(x => ({ track: x.t || "", artist: x.a || "", album: x.al || "" }))
-      .filter(x => x.track && x.artist);
-  } catch { return null; }
+  if (!hash.startsWith("#ids=")) return null;
+  const payload = hash.slice("#ids=".length).trim();
+  if (!payload) return null;
+  const parts = payload.split(".").filter(Boolean);
+  const ids = parts.map(fromBase36).filter(n => Number.isFinite(n) && n > 0);
+  return ids.length ? ids.slice(0,25) : null;
 }
-async function copyShareLink(queries) {
+
+async function copyShareLinkFromCurrentTracks() {
+  const ids = tracks.map(t => t.trackId).filter(Boolean);
+  if (ids.length !== 25) {
+    showToast("Some tracks are missing IDs. Fix them first, then share.");
+    return;
+  }
   const base = `${window.location.origin}${window.location.pathname}`;
-  const url = `${base}${encodeListToHash(queries)}`;
+  const url = `${base}${encodeIdsToHash(ids)}`;
   await navigator.clipboard.writeText(url);
   showToast("Share link copied.");
 }
 
 // ---------- Floating physics ----------
 function rankToSizePx(rank) {
-  // rank 1 biggest, rank 25 smallest
-  // you asked #1 at least 2x bigger than before; we’ll go chunky:
-  // #1 ~ 260px, #25 ~ 110px (responsive-ish)
-  const max = 280;
+  // make #1 VERY big; smaller down to 25
+  const max = 340; // bigger than before (your request)
   const min = 110;
-  const t = (rank - 1) / 24; // 0..1
-  // ease-out so top ranks are notably bigger
-  const eased = Math.pow(t, 0.75);
+  const t = (rank - 1) / 24;
+  const eased = Math.pow(t, 0.82);
   return Math.round(max - (max - min) * eased);
 }
 
@@ -389,33 +352,19 @@ function createBubble(rank, meta) {
   el.appendChild(img);
   el.appendChild(overlay);
 
-  img.addEventListener("load", async () => {
-    try {
-      const lum = await computeLuminance(img);
-      const isLight = lum > 0.55;
-      overlay.style.background = isLight ? "rgba(0,0,0,.45)" : "rgba(255,255,255,.18)";
-      span.style.color = isLight ? "rgba(255,255,255,.95)" : "rgba(10,10,14,.95)";
-      span.style.borderColor = isLight ? "rgba(255,255,255,.22)" : "rgba(0,0,0,.22)";
-    } catch {}
-  });
-
-  // Click: play/stop
   el.addEventListener("click", (evt) => {
-    // Shift+click opens fix
     if (evt.shiftKey) {
       openFixModal(rank);
       return;
     }
-
-    if (!meta.previewUrl) {
-      showToast(`#${rank}: no preview found. Shift+Click to fix.`);
+    const b = bubbles.find(x => x.rank === rank);
+    if (!b?.meta?.previewUrl) {
+      showToast(`#${rank}: missing preview. Shift+Click to paste iTunes link.`);
       return;
     }
-    togglePlay(rank, meta.previewUrl, el);
-    showToast(`#${rank}: ${meta.trackName} — ${meta.artistName}`);
+    togglePlay(rank, b.meta.previewUrl, el);
   });
 
-  // Right click also opens fix
   el.addEventListener("contextmenu", (evt) => {
     evt.preventDefault();
     openFixModal(rank);
@@ -426,20 +375,29 @@ function createBubble(rank, meta) {
 
 function layoutInitialBubbles() {
   const rect = els.stage.getBoundingClientRect();
-  const cx = rect.width / 2;
-  const cy = rect.height / 2;
+  const W = rect.width;
+  const H = rect.height;
 
-  // Place in a loose spiral to start, then physics settles it
-  const spiralGap = 22;
+  // distribute widely so they don’t start stacked
   for (let i = 0; i < bubbles.length; i++) {
     const b = bubbles[i];
-    const angle = i * 0.75;
-    const radius = spiralGap * Math.sqrt(i) * 2.2;
-    b.x = cx + Math.cos(angle) * radius;
-    b.y = cy + Math.sin(angle) * radius;
-    b.vx = (Math.random() - 0.5) * 0.8;
-    b.vy = (Math.random() - 0.5) * 0.8;
+    b.x = b.r + Math.random() * (W - 2*b.r);
+    b.y = b.r + Math.random() * (H - 2*b.r);
+    b.vx = (Math.random() - 0.5) * 0.6;
+    b.vy = (Math.random() - 0.5) * 0.6;
   }
+}
+
+function attachCursorEvents() {
+  els.stage.addEventListener("mousemove", (e) => {
+    const rect = els.stage.getBoundingClientRect();
+    cursor.x = e.clientX - rect.left;
+    cursor.y = e.clientY - rect.top;
+    cursor.active = true;
+  });
+  els.stage.addEventListener("mouseleave", () => {
+    cursor.active = false;
+  });
 }
 
 function stepPhysics() {
@@ -447,46 +405,41 @@ function stepPhysics() {
   const W = rect.width;
   const H = rect.height;
 
-  // Tunables
-  const damping = 0.985;
-  const wander = 0.06;              // water drift
-  const cursorForce = 0.55;         // how much cursor pushes/pulls
-  const bubbleRepel = 0.85;         // collision repulsion
-  const centerPull = 0.0025;        // gentle keep-in-bounds
+  // calmer: less sensitive
+  const damping = 0.992;
+  const wander = 0.018;
+  const cursorForce = 0.14;   // much lower
+  const range = 180;          // smaller influence radius
+  const bubbleRepel = 0.75;
+  const centerPull = 0.0009;
 
-  // cursor in stage coords
   const cx = cursor.x;
   const cy = cursor.y;
 
-  // Update velocities
   for (const b of bubbles) {
-    // water wander
     b.vx += (Math.random() - 0.5) * wander;
     b.vy += (Math.random() - 0.5) * wander;
 
-    // gentle pull toward center so they don't all drift to edges
     b.vx += (W/2 - b.x) * centerPull;
     b.vy += (H/2 - b.y) * centerPull;
 
-    // cursor interaction (repel when close)
     if (cursor.active) {
       const dx = b.x - cx;
       const dy = b.y - cy;
       const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-      const range = 220; // influence radius
       if (dist < range) {
         const k = (1 - dist / range) * cursorForce;
-        b.vx += (dx / dist) * k * 2.2;
-        b.vy += (dy / dist) * k * 2.2;
+        // gentle repel
+        b.vx += (dx / dist) * k;
+        b.vy += (dy / dist) * k;
       }
     }
 
-    // damping
     b.vx *= damping;
     b.vy *= damping;
   }
 
-  // Bubble-bubble repulsion to reduce overlap
+  // repulsion to reduce overlap
   for (let i = 0; i < bubbles.length; i++) {
     for (let j = i + 1; j < bubbles.length; j++) {
       const a = bubbles[i];
@@ -498,7 +451,7 @@ function stepPhysics() {
       const minDist = (a.r + c.r) * 0.92;
       if (dist < minDist) {
         const overlap = (minDist - dist) / minDist;
-        const push = overlap * bubbleRepel * 2.2;
+        const push = overlap * bubbleRepel * 2.0;
         const ux = dx / dist;
         const uy = dy / dist;
         a.vx -= ux * push;
@@ -509,18 +462,16 @@ function stepPhysics() {
     }
   }
 
-  // Integrate + bounds bounce
   for (const b of bubbles) {
     b.x += b.vx;
     b.y += b.vy;
 
     const pad = b.r + 10;
-    if (b.x < pad) { b.x = pad; b.vx *= -0.8; }
-    if (b.x > W - pad) { b.x = W - pad; b.vx *= -0.8; }
-    if (b.y < pad) { b.y = pad; b.vy *= -0.8; }
-    if (b.y > H - pad) { b.y = H - pad; b.vy *= -0.8; }
+    if (b.x < pad) { b.x = pad; b.vx *= -0.72; }
+    if (b.x > W - pad) { b.x = W - pad; b.vx *= -0.72; }
+    if (b.y < pad) { b.y = pad; b.vy *= -0.72; }
+    if (b.y > H - pad) { b.y = H - pad; b.vy *= -0.72; }
 
-    // Apply DOM transform
     b.el.style.transform = `translate(${(b.x - b.r).toFixed(1)}px, ${(b.y - b.r).toFixed(1)}px)`;
   }
 
@@ -536,34 +487,33 @@ function stopPhysics() {
   rafId = null;
 }
 
-function attachCursorEvents() {
-  els.stage.addEventListener("mousemove", (e) => {
-    const rect = els.stage.getBoundingClientRect();
-    cursor.x = e.clientX - rect.left;
-    cursor.y = e.clientY - rect.top;
-    cursor.active = true;
-  });
-  els.stage.addEventListener("mouseleave", () => {
-    cursor.active = false;
-  });
+// ---------- Fix modal: paste iTunes link or ID ----------
+function extractTrackId(input) {
+  const s = String(input || "").trim();
+  if (!s) return null;
+
+  // If numeric ID
+  if (/^\d+$/.test(s)) return Number(s);
+
+  // If iTunes URL contains ?i=TRACKID or /idTRACKID
+  const m1 = s.match(/[?&]i=(\d+)/);
+  if (m1) return Number(m1[1]);
+
+  const m2 = s.match(/\/id(\d+)/);
+  if (m2) return Number(m2[1]);
+
+  return null;
 }
 
-// ---------- Manual fix modal ----------
 function openFixModal(rank) {
   fixingRank = rank;
-  const meta = tracks[rank - 1];
-  const q = queriesSession ? queriesSession[25 - rank] : null; // remember: reversed ranking
-  const defaultQuery = q ? `${q.track} ${q.artist}` : `${meta.trackName} ${meta.artistName}`;
-
-  els.fixTitle.textContent = `Fix #${rank}`;
-  els.fixQuery.value = defaultQuery;
-  els.fixHint.textContent = "Tip: include artist + album keywords if needed. Click a result to replace.";
-  els.fixResults.innerHTML = "";
+  els.fixTitle.textContent = `Fix #${rank} (paste iTunes track link or ID)`;
+  els.fixHint.textContent = "Paste an iTunes track URL (with ?i=123...) or a numeric trackId, then click Apply.";
+  els.fixQuery.value = "";
+  if (els.fixResults) els.fixResults.style.display = "none"; // hide results grid
   els.fixModal.classList.remove("hidden");
   els.fixModal.setAttribute("aria-hidden", "false");
-
-  // auto-search immediately
-  runFixSearch().catch(() => {});
+  els.fixQuery.focus();
 }
 
 function closeFixModal() {
@@ -572,126 +522,74 @@ function closeFixModal() {
   els.fixModal.setAttribute("aria-hidden", "true");
 }
 
-function renderFixResults(results) {
-  els.fixResults.innerHTML = "";
-  if (!results.length) {
-    els.fixHint.textContent = "No results found. Try a different query (add album name, remove punctuation).";
+async function applyFixFromPaste() {
+  const rank = fixingRank;
+  if (!rank) return;
+
+  const id = extractTrackId(els.fixQuery.value);
+  if (!id) {
+    els.fixHint.textContent = "Could not detect a trackId. Paste an iTunes track link that includes ?i=#### or a numeric ID.";
     return;
   }
 
-  for (const r of results) {
-    const card = document.createElement("div");
-    card.className = "resultCard";
+  els.fixHint.textContent = "Looking up…";
+  try {
+    const res = await itunesLookupByIds([id]);
+    const r = res[0];
+    if (!r) {
+      els.fixHint.textContent = "Lookup returned nothing. Double-check the ID/link.";
+      return;
+    }
 
-    const top = document.createElement("div");
-    top.className = "resultTop";
+    const artwork = (r.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
+    const replaced = {
+      trackId: r.trackId || id,
+      trackName: r.trackName || tracks[rank - 1].trackName,
+      artistName: r.artistName || tracks[rank - 1].artistName,
+      albumName: r.collectionName || tracks[rank - 1].albumName,
+      artworkUrl: artwork || tracks[rank - 1].artworkUrl,
+      previewUrl: r.previewUrl || null,
+      trackViewUrl: r.trackViewUrl || null,
+      score: 999,
+      raw: r,
+    };
 
-    const img = document.createElement("img");
-    img.src = (r.artworkUrl100 || "").replace("100x100bb.jpg","200x200bb.jpg");
-    img.alt = r.trackName || "result";
+    tracks[rank - 1] = replaced;
 
-    const meta = document.createElement("div");
-    meta.className = "resultMeta";
+    const b = bubbles.find(x => x.rank === rank);
+    if (b) {
+      b.meta = replaced;
+      const img = b.el.querySelector("img");
+      img.src = replaced.artworkUrl || "";
+    }
 
-    const t = document.createElement("div");
-    t.className = "resultTrack";
-    t.textContent = r.trackName || "";
-
-    const a = document.createElement("div");
-    a.className = "resultArtist";
-    a.textContent = r.artistName || "";
-
-    const al = document.createElement("div");
-    al.className = "resultAlbum";
-    al.textContent = r.collectionName || "";
-
-    meta.appendChild(t);
-    meta.appendChild(a);
-    meta.appendChild(al);
-
-    top.appendChild(img);
-    top.appendChild(meta);
-    card.appendChild(top);
-
-    card.addEventListener("click", () => {
-      if (!fixingRank) return;
-
-      const artwork = (r.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
-      const replaced = {
-        trackName: r.trackName || tracks[fixingRank - 1].trackName,
-        artistName: r.artistName || tracks[fixingRank - 1].artistName,
-        albumName: r.collectionName || tracks[fixingRank - 1].albumName,
-        artworkUrl: artwork || tracks[fixingRank - 1].artworkUrl,
-        previewUrl: r.previewUrl || null,
-        trackViewUrl: r.trackViewUrl || null,
-        collectionViewUrl: r.collectionViewUrl || null,
-        score: 999,
-        raw: r,
-      };
-
-      applyManualReplacement(fixingRank, replaced);
-      closeFixModal();
-      showToast(`Replaced #${fixingRank}`);
-    });
-
-    els.fixResults.appendChild(card);
+    closeFixModal();
+    showToast(`Fixed #${rank}`);
+  } catch (e) {
+    els.fixHint.textContent = "Lookup failed. Try again.";
   }
 }
 
-async function runFixSearch() {
-  const q = els.fixQuery.value.trim();
-  if (!q) return;
-  els.fixHint.textContent = "Searching…";
-  els.fixResults.innerHTML = "";
-
-  const results = await itunesSearch(q, 25);
-
-  // sort results to prefer album-like collections even in manual search
-  results.sort((a, b) => {
-    const pa = penaltyForBadCollection(a.collectionName) + bonusForAlbumCollection(a);
-    const pb = penaltyForBadCollection(b.collectionName) + bonusForAlbumCollection(b);
-    return pb - pa;
-  });
-
-  renderFixResults(results);
-}
-
-function applyManualReplacement(rank, newMeta) {
-  // update tracks
-  tracks[rank - 1] = newMeta;
-
-  // update bubble DOM + physics radius
-  const b = bubbles.find(x => x.rank === rank);
-  if (!b) return;
-
-  // swap image
-  const img = b.el.querySelector("img");
-  img.src = newMeta.artworkUrl || "";
-
-  // swap preview binding by updating bubble meta ref
-  b.meta = newMeta;
-}
-
-// ---------- Build showcase ----------
+// ---------- Build ----------
 async function buildShowcase(queries) {
   stopAudio();
   stopPhysics();
   els.stage.innerHTML = "";
 
-  // You wanted rank #1 to be playlist #25 -> reverse
+  // rank #1 = playlist #25
   const reversed = [...queries].reverse();
   queriesSession = queries;
 
   saveSession(queries);
   setMode("showcase");
-  showToast("Loading previews…");
+  showToast("Loading…");
 
-  // Resolve iTunes metas
   tracks = await Promise.all(
     reversed.map(async (q) => {
       try {
         const m = await lookupITunesBest(q);
         return m || {
+          trackId: null,
           trackName: q.track,
           artistName: q.artist,
           albumName: q.album,
@@ -702,6 +600,7 @@ async function buildShowcase(queries) {
         };
       } catch {
         return {
+          trackId: null,
           trackName: q.track,
           artistName: q.artist,
           albumName: q.album,
@@ -714,7 +613,6 @@ async function buildShowcase(queries) {
     })
   );
 
-  // Build bubbles
   bubbles = [];
   for (let i = 0; i < tracks.length; i++) {
     const rank = i + 1;
@@ -735,33 +633,17 @@ async function buildShowcase(queries) {
       vx: 0, vy: 0,
       r: size / 2,
     });
-
-    // patch click handler to reference current meta
-    el.addEventListener("click", (evt) => {
-      if (evt.shiftKey) return; // already handled earlier
-      const b = bubbles.find(bb => bb.rank === rank);
-      if (!b?.meta?.previewUrl) return;
-      togglePlay(rank, b.meta.previewUrl, el);
-    });
   }
 
   attachCursorEvents();
   layoutInitialBubbles();
   startPhysics();
 
-  // Warn if any missing previews so you know which to fix
-  const missing = tracks
-    .map((t, idx) => ({ rank: idx + 1, ok: !!t.previewUrl, score: t.score }))
-    .filter(x => !x.ok);
-
-  if (missing.length) {
-    showToast(`Loaded with ${missing.length} missing previews. Shift+Click to fix.`);
-  } else {
-    showToast("Ready. Click to play/stop.");
-  }
+  const missing = tracks.filter(t => !t.previewUrl).length;
+  if (missing) showToast(`Loaded with ${missing} missing previews. Shift+Click a tile to paste iTunes link.`);
+  else showToast("Ready.");
 }
 
-// ---------- Events ----------
 async function handleBuildClick() {
   const file = els.csvFile.files?.[0];
   if (!file) { setStatus("Upload your CSV first."); return; }
@@ -796,6 +678,7 @@ function handleBack() {
   setMode("import");
 }
 
+// ---------- Init / events ----------
 function wireEvents() {
   els.buildBtn.addEventListener("click", () => {
     handleBuildClick().catch(e => setStatus(String(e?.message || e)));
@@ -804,22 +687,27 @@ function wireEvents() {
   els.backBtn.addEventListener("click", handleBack);
 
   els.copyLinkBtn.addEventListener("click", async () => {
-    const q = queriesSession || loadSession();
-    if (!q?.length) { showToast("Build a showcase first."); return; }
-    try { await copyShareLink(q); }
-    catch { showToast("Copy failed (browser blocked clipboard)."); }
+    try {
+      await copyShareLinkFromCurrentTracks();
+    } catch {
+      showToast("Copy failed (clipboard blocked).");
+    }
   });
 
   els.audio.addEventListener("ended", () => stopAudio());
 
-  // Modal
+  // modal
   els.closeFixBtn.addEventListener("click", closeFixModal);
   els.fixModal.addEventListener("click", (e) => {
     if (e.target === els.fixModal) closeFixModal();
   });
-  els.fixSearchBtn.addEventListener("click", () => runFixSearch().catch(() => {}));
+
+  // “Apply” button uses fixSearchBtn now
+  els.fixSearchBtn.textContent = "Apply";
+  els.fixSearchBtn.addEventListener("click", () => applyFixFromPaste());
+
   els.fixQuery.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") runFixSearch().catch(() => {});
+    if (e.key === "Enter") applyFixFromPaste();
     if (e.key === "Escape") closeFixModal();
   });
 
@@ -829,20 +717,61 @@ function wireEvents() {
   });
 }
 
-// ---------- Init ----------
 (async function init() {
   wireEvents();
 
-  // Load from share link first
-  const fromHash = decodeListFromHash();
-  if (fromHash?.length) {
+  // Prefer short share links
+  const idsFromHash = decodeIdsFromHash();
+  if (idsFromHash?.length) {
+    setMode("showcase");
     setStatus("");
-    await buildShowcase(fromHash);
+
+    showToast("Loading from share link…");
+    // Lookup all 25 at once
+    const res = await itunesLookupByIds(idsFromHash);
+
+    // Map by id for stable ordering
+    const byId = new Map(res.map(r => [r.trackId, r]));
+    tracks = idsFromHash.map((id) => {
+      const r = byId.get(id);
+      const artwork = r ? (r.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg") : "";
+      return {
+        trackId: id,
+        trackName: r?.trackName || `Track ${id}`,
+        artistName: r?.artistName || "",
+        albumName: r?.collectionName || "",
+        artworkUrl: artwork || r?.artworkUrl100 || "",
+        previewUrl: r?.previewUrl || null,
+        trackViewUrl: r?.trackViewUrl || null,
+        score: 999,
+        raw: r || null,
+      };
+    });
+
+    // render bubbles from tracks
+    els.stage.innerHTML = "";
+    bubbles = [];
+    for (let i = 0; i < tracks.length; i++) {
+      const rank = i + 1;
+      const meta = tracks[i];
+
+      const size = rankToSizePx(rank);
+      const el = createBubble(rank, meta);
+      el.style.width = `${size}px`;
+      el.style.height = `${size}px`;
+
+      els.stage.appendChild(el);
+      bubbles.push({ rank, meta, el, x:0, y:0, vx:0, vy:0, r: size/2 });
+    }
+
+    attachCursorEvents();
+    layoutInitialBubbles();
+    startPhysics();
     showToast("Loaded from share link.");
     return;
   }
 
-  // Otherwise restore session
+  // session restore
   const saved = loadSession();
   if (saved?.length) {
     setStatus("");
