@@ -18,11 +18,9 @@ const els = {
   backBtn: req("backBtn"),
   copyLinkBtn: req("copyLinkBtn"),
   status: req("status"),
-
   importHeader: req("importHeader"),
   importCard: req("importCard"),
   showcase: req("showcase"),
-
   grid: req("grid"),
   toast: req("toast"),
   audio: req("audio"),
@@ -34,12 +32,14 @@ const els = {
   fixQuery: opt("fixQuery"),
   fixApplyBtn: opt("fixApplyBtn"),
   fixHint: opt("fixHint"),
+
+  // Top 10 Albums
+  albumTiles: Array.from({ length: 10 }, (_, i) => req(`album${i + 1}`))
 };
 
 // ---- Global state ----
 let tracks = [];
 let fixingRank = null;
-
 let currentPlaying = { rank: null, tile: null };
 
 const SESSION_KEY = "top25_queries_v8";
@@ -88,6 +88,56 @@ function togglePlay(rank, previewUrl, tile) {
   els.audio.play().catch(() => {});
   showToast(`Playing #${rank}`);
 }
+
+// ---- iTunes Search ----
+function norm(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function itunesSearch(term, limit = 15) {
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=album&limit=${limit}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`iTunes search failed (${resp.status})`);
+  const data = await resp.json();
+  return data.results || [];
+}
+
+async function lookupBest(q) {
+  const artist = (q.artist || "").split(",")[0].trim();
+  const term = q.album ? `${q.track} ${artist} ${q.album}` : `${q.track} ${artist}`;
+  const results = await itunesSearch(term, 1); // Get the top result only
+  if (!results.length) return null;
+
+  const best = results[0];
+  const artwork = (best.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
+
+  return {
+    albumName: best.collectionName || q.album,
+    artworkUrl: artwork || best.artworkUrl100 || "",
+  };
+}
+
+// ---- Function to handle album tile clicks ----
+async function handleAlbumClick(albumIndex) {
+  const albumTile = els.albumTiles[albumIndex];
+  const albumName = `Album ${albumIndex + 1}`; // Placeholder name, can be customized
+
+  // Searching for the album based on the index
+  const result = await lookupBest({ track: albumName, artist: "Unknown" });
+
+  if (result) {
+    albumTile.style.backgroundImage = `url(${result.artworkUrl})`;
+    albumTile.classList.add("album-loaded");
+    showToast(`Found album: ${result.albumName}`);
+  } else {
+    showToast("Album not found.");
+  }
+}
+
+// ---- Initialize Event Listeners for Albums ----
+els.albumTiles.forEach((tile, index) => {
+  tile.addEventListener("click", () => handleAlbumClick(index));
+});
 
 // ---- Session ----
 function saveSession(queries) {
@@ -173,198 +223,7 @@ function extractTop25QueriesFromCSV(csvText) {
   return out.slice(0, 25);
 }
 
-// ---- iTunes search ----
-function norm(s) {
-  return String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-}
-
-async function itunesSearch(term, limit = 15) {
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=${limit}`;
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`iTunes search failed (${resp.status})`);
-  const data = await resp.json();
-  return data.results || [];
-}
-
-function score(q, r) {
-  const qt = norm(q.track);
-  const qa = norm((q.artist || "").split(",")[0]);
-  const qalb = norm(q.album);
-
-  const rt = norm(r.trackName);
-  const ra = norm(r.artistName);
-  const ralb = norm(r.collectionName);
-
-  let s = 0;
-  if (rt === qt) s += 20;
-  if (rt.includes(qt)) s += 10;
-  if (ra.includes(qa)) s += 14;
-
-  if (qalb) {
-    if (ralb === qalb) s += 18;
-    if (ralb.includes(qalb) || qalb.includes(ralb)) s += 10;
-  }
-
-  const c = norm(r.collectionName);
-  if (c.includes("dj mix")) s -= 40;
-  if (c.includes("mix")) s -= 10;
-
-  const ct = String(r.collectionType || "").toLowerCase();
-  if (ct === "album") s += 10;
-
-  return s;
-}
-
-async function lookupBest(q) {
-  const artist = (q.artist || "").split(",")[0].trim();
-  const term = q.album ? `${q.track} ${artist} ${q.album}` : `${q.track} ${artist}`;
-  const results = await itunesSearch(term, 18);
-  if (!results.length) return null;
-
-  let best = results[0];
-  let bestS = score(q, best);
-  for (const r of results) {
-    const sc = score(q, r);
-    if (sc > bestS) { best = r; bestS = sc; }
-  }
-
-  const artwork = (best.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
-
-  return {
-    trackId: best.trackId || null,
-    trackName: best.trackName || q.track,
-    artistName: best.artistName || q.artist,
-    albumName: best.collectionName || q.album,
-    artworkUrl: artwork || best.artworkUrl100 || "",
-    previewUrl: best.previewUrl || null,
-    trackViewUrl: best.trackViewUrl || null,
-  };
-}
-
-// ---- Diamond rows with “merge last single into bottom row” ----
-function buildDiamondRows(total = 25) {
-  const above = [];
-  const below = [];
-
-  let rank = 2;
-  let size = 2;
-  let placeAbove = true;
-
-  while (rank <= total) {
-    const remaining = total - rank + 1;
-    const take = Math.min(size, remaining);
-
-    const row = [];
-    for (let i = 0; i < take; i++) row.push(rank++);
-
-    if (placeAbove) above.push(row);
-    else below.push(row);
-
-    placeAbove = !placeAbove;
-    if (placeAbove) size += 1;
-  }
-
-  // merge final [single] into last bottom row
-  if (below.length >= 2) {
-    const last = below[below.length - 1];
-    const prev = below[below.length - 2];
-    if (last.length === 1) {
-      prev.push(last[0]);
-      below.pop();
-    }
-  }
-
-  return [...above.reverse(), [1], ...below];
-}
-
-// ---- Row scaling: gentle drop near center ----
-function rowScale(dist) {
-  const curve = [1.0, 0.92, 0.84, 0.76, 0.70, 0.64, 0.60];
-  return curve[Math.min(dist, curve.length - 1)];
-}
-
-// ---- Render ----
-function createTile(rank, meta) {
-  const tile = document.createElement("div");
-  tile.className = "tile" + (rank === 1 ? " hero" : "");
-  tile.dataset.rank = String(rank);
-
-  const img = document.createElement("img");
-  img.src = meta.artworkUrl || "";
-  img.alt = `${meta.trackName || ""} ${meta.artistName || ""}`.trim() || `#${rank}`;
-
-  const overlay = document.createElement("div");
-  overlay.className = "overlay";
-  const span = document.createElement("span");
-  span.textContent = String(rank);
-  overlay.appendChild(span);
-
-  tile.appendChild(img);
-  tile.appendChild(overlay);
-
-  tile.addEventListener("click", () => {
-    if (!meta.previewUrl) {
-      showToast(`#${rank}: no preview`);
-      return;
-    }
-    togglePlay(rank, meta.previewUrl, tile);
-  });
-
-  return tile;
-}
-
-function renderPyramid() {
-  stopAudio();
-  els.grid.innerHTML = "";
-
-  const rows = buildDiamondRows(25);
-  const centerIdx = rows.findIndex(r => r.length === 1 && r[0] === 1);
-
-  rows.forEach((rowRanks, idx) => {
-    const rowEl = document.createElement("div");
-    rowEl.className = "pyrRow";
-
-    const dist = Math.abs(idx - centerIdx);
-    const scale = rowScale(dist);
-    rowEl.style.transform = `scale(${scale})`;
-    rowEl.style.transformOrigin = "center center";
-
-    rowRanks.forEach(r => rowEl.appendChild(createTile(r, tracks[r - 1] || {})));
-    els.grid.appendChild(rowEl);
-  });
-}
-
-// ---- Share link (leave button functional even if you don’t use it) ----
-async function copyShareLink() {
-  const base = `${window.location.origin}${window.location.pathname}`;
-  await navigator.clipboard.writeText(base);
-  showToast("Copied base link (share encoding can be added back next).");
-}
-
 // ---- Build ----
-async function buildShowcase(queries) {
-  // reverse so #1 = last in playlist (your preference)
-  const reversed = [...queries].reverse();
-
-  saveSession(queries);
-  setMode("showcase");
-  showToast("Loading…");
-
-  const resolved = await Promise.all(
-    reversed.map(async (q) => {
-      try {
-        return (await lookupBest(q)) || {};
-      } catch {
-        return {};
-      }
-    })
-  );
-
-  tracks = resolved.slice(0, 25);
-  renderPyramid();
-  showToast("Ready.");
-}
-
 async function handleBuildClick() {
   console.log("[Top25] Build clicked");
   try {
@@ -385,6 +244,7 @@ async function handleBuildClick() {
   }
 }
 
+// ---- Reset ----
 function handleReset() {
   stopAudio();
   els.csvFile.value = "";
@@ -394,6 +254,7 @@ function handleReset() {
   setStatus("");
 }
 
+// ---- Back ----
 function handleBack() {
   stopAudio();
   setMode("import");
