@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <!-- Import UI -->
     <header class="header" id="importHeader">
       <div>
         <h1>Top 25 Playlist Showcase</h1>
@@ -18,19 +19,33 @@
       <section class="card" id="importCard">
         <label class="label" for="csvFile">Upload CSV</label>
         <input id="csvFile" class="file" type="file" accept=".csv,text/csv" />
+
         <div class="row">
-          <button id="renderBtn" class="btn">Build Showcase</button>
-          <button id="clearBtn" class="btn btn--ghost">Clear</button>
+          <button id="buildBtn" class="btn">Build Showcase</button>
+          <button id="resetBtn" class="btn btn--ghost">Reset</button>
         </div>
+
         <div id="status" class="status"></div>
+        <div class="hint">
+          This version uses iTunes 30-second previews for autoplay (no Spotify developer app needed).
+        </div>
       </section>
 
+      <!-- Showcase UI -->
       <section class="showcase hidden" id="showcase">
+        <div class="showcaseTop">
+          <div class="showcaseTitle">Top 25</div>
+          <button id="backBtn" class="btn btn--ghost">Back to Upload</button>
+        </div>
+
         <div id="grid" class="spiralGrid"></div>
+        <div id="toast" class="toast hidden"></div>
       </section>
     </main>
 
+    <!-- Hidden audio for autoplay previews -->
     <audio id="audio" preload="none"></audio>
+
     <script src="./app.js"></script>
   </body>
 </html>
