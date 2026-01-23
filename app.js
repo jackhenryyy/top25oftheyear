@@ -16,17 +16,16 @@ const els = {
   audio: $("audio"),
   toast: $("toast"),
 
-  // modal elements from your existing HTML
   fixModal: $("fixModal"),
   closeFixBtn: $("closeFixBtn"),
   fixTitle: $("fixTitle"),
-  fixQuery: $("fixQuery"),         // now used to paste iTunes link or ID
-  fixSearchBtn: $("fixSearchBtn"), // now used as "Apply"
+  fixQuery: $("fixQuery"),
+  fixSearchBtn: $("fixSearchBtn"),
   fixHint: $("fixHint"),
-  fixResults: $("fixResults"),     // unused (we’ll hide)
+  fixResults: $("fixResults"),
 };
 
-const STORAGE_KEY = "top25_queries_v4";
+const STORAGE_KEY = "top25_queries_v5";
 const TOAST_MS = 1600;
 
 let queriesSession = null;
@@ -37,7 +36,6 @@ let rafId = null;
 let currentPlaying = { rank: null, tile: null };
 
 let cursor = { x: 0, y: 0, active: false };
-
 let fixingRank = null;
 
 // ---------- UI ----------
@@ -292,12 +290,11 @@ async function lookupITunesBest(q) {
   };
 }
 
-// ---------- Share link v2: short IDs ----------
+// ---------- Share link v2: base36 IDs ----------
 function toBase36(n){ return Number(n).toString(36); }
 function fromBase36(s){ return parseInt(s, 36); }
 
 function encodeIdsToHash(trackIds) {
-  // base36 IDs joined by "."
   return `#ids=${trackIds.map(toBase36).join(".")}`;
 }
 
@@ -325,8 +322,7 @@ async function copyShareLinkFromCurrentTracks() {
 
 // ---------- Floating physics ----------
 function rankToSizePx(rank) {
-  // make #1 VERY big; smaller down to 25
-  const max = 340; // bigger than before (your request)
+  const max = 340;
   const min = 110;
   const t = (rank - 1) / 24;
   const eased = Math.pow(t, 0.82);
@@ -378,13 +374,12 @@ function layoutInitialBubbles() {
   const W = rect.width;
   const H = rect.height;
 
-  // distribute widely so they don’t start stacked
   for (let i = 0; i < bubbles.length; i++) {
     const b = bubbles[i];
     b.x = b.r + Math.random() * (W - 2*b.r);
     b.y = b.r + Math.random() * (H - 2*b.r);
-    b.vx = (Math.random() - 0.5) * 0.6;
-    b.vy = (Math.random() - 0.5) * 0.6;
+    b.vx = (Math.random() - 0.5) * 0.4;
+    b.vy = (Math.random() - 0.5) * 0.4;
   }
 }
 
@@ -405,41 +400,49 @@ function stepPhysics() {
   const W = rect.width;
   const H = rect.height;
 
-  // calmer: less sensitive
-  const damping = 0.992;
-  const wander = 0.018;
-  const cursorForce = 0.14;   // much lower
-  const range = 180;          // smaller influence radius
-  const bubbleRepel = 0.75;
-  const centerPull = 0.0009;
-
-  const cx = cursor.x;
-  const cy = cursor.y;
+  // slower + smoother + less jumpy
+  const damping = 0.996;
+  const wander = 0.006;
+  const cursorForce = 0.05;
+  const range = 220;
+  const bubbleRepel = 0.35;
+  const centerPull = 0.00025;
 
   for (const b of bubbles) {
+    // gentle drift
     b.vx += (Math.random() - 0.5) * wander;
     b.vy += (Math.random() - 0.5) * wander;
 
+    // barely keep things from drifting off forever
     b.vx += (W/2 - b.x) * centerPull;
     b.vy += (H/2 - b.y) * centerPull;
 
+    // gentle cursor repel
     if (cursor.active) {
-      const dx = b.x - cx;
-      const dy = b.y - cy;
+      const dx = b.x - cursor.x;
+      const dy = b.y - cursor.y;
       const dist = Math.sqrt(dx*dx + dy*dy) || 1;
       if (dist < range) {
         const k = (1 - dist / range) * cursorForce;
-        // gentle repel
         b.vx += (dx / dist) * k;
         b.vy += (dy / dist) * k;
       }
     }
 
+    // damping to smooth
     b.vx *= damping;
     b.vy *= damping;
+
+    // speed limit to prevent zipping
+    const maxSpeed = 1.1;
+    const sp = Math.sqrt(b.vx*b.vx + b.vy*b.vy) || 0;
+    if (sp > maxSpeed) {
+      b.vx = (b.vx / sp) * maxSpeed;
+      b.vy = (b.vy / sp) * maxSpeed;
+    }
   }
 
-  // repulsion to reduce overlap
+  // mild repulsion (avoid pile-ups, but not violent)
   for (let i = 0; i < bubbles.length; i++) {
     for (let j = i + 1; j < bubbles.length; j++) {
       const a = bubbles[i];
@@ -448,7 +451,7 @@ function stepPhysics() {
       const dy = c.y - a.y;
       const dist = Math.sqrt(dx*dx + dy*dy) || 1;
 
-      const minDist = (a.r + c.r) * 0.92;
+      const minDist = (a.r + c.r) * 0.90;
       if (dist < minDist) {
         const overlap = (minDist - dist) / minDist;
         const push = overlap * bubbleRepel * 2.0;
@@ -462,15 +465,16 @@ function stepPhysics() {
     }
   }
 
+  // integrate + bounds bounce
   for (const b of bubbles) {
     b.x += b.vx;
     b.y += b.vy;
 
     const pad = b.r + 10;
-    if (b.x < pad) { b.x = pad; b.vx *= -0.72; }
-    if (b.x > W - pad) { b.x = W - pad; b.vx *= -0.72; }
-    if (b.y < pad) { b.y = pad; b.vy *= -0.72; }
-    if (b.y > H - pad) { b.y = H - pad; b.vy *= -0.72; }
+    if (b.x < pad) { b.x = pad; b.vx *= -0.5; }
+    if (b.x > W - pad) { b.x = W - pad; b.vx *= -0.5; }
+    if (b.y < pad) { b.y = pad; b.vy *= -0.5; }
+    if (b.y > H - pad) { b.y = H - pad; b.vy *= -0.5; }
 
     b.el.style.transform = `translate(${(b.x - b.r).toFixed(1)}px, ${(b.y - b.r).toFixed(1)}px)`;
   }
@@ -492,10 +496,8 @@ function extractTrackId(input) {
   const s = String(input || "").trim();
   if (!s) return null;
 
-  // If numeric ID
   if (/^\d+$/.test(s)) return Number(s);
 
-  // If iTunes URL contains ?i=TRACKID or /idTRACKID
   const m1 = s.match(/[?&]i=(\d+)/);
   if (m1) return Number(m1[1]);
 
@@ -510,7 +512,6 @@ function openFixModal(rank) {
   els.fixTitle.textContent = `Fix #${rank} (paste iTunes track link or ID)`;
   els.fixHint.textContent = "Paste an iTunes track URL (with ?i=123...) or a numeric trackId, then click Apply.";
   els.fixQuery.value = "";
-  if (els.fixResults) els.fixResults.style.display = "none"; // hide results grid
   els.fixModal.classList.remove("hidden");
   els.fixModal.setAttribute("aria-hidden", "false");
   els.fixQuery.focus();
@@ -571,6 +572,36 @@ async function applyFixFromPaste() {
 }
 
 // ---------- Build ----------
+async function buildFromTracksOnly(trackMetas) {
+  stopAudio();
+  stopPhysics();
+  els.stage.innerHTML = "";
+
+  tracks = trackMetas.slice(0,25);
+
+  bubbles = [];
+  for (let i = 0; i < tracks.length; i++) {
+    const rank = i + 1;
+    const meta = tracks[i];
+
+    const size = rankToSizePx(rank);
+    const el = createBubble(rank, meta);
+    el.style.width = `${size}px`;
+    el.style.height = `${size}px`;
+
+    els.stage.appendChild(el);
+    bubbles.push({ rank, meta, el, x:0, y:0, vx:0, vy:0, r: size/2 });
+  }
+
+  attachCursorEvents();
+  layoutInitialBubbles();
+  startPhysics();
+
+  const missing = tracks.filter(t => !t.previewUrl).length;
+  if (missing) showToast(`Loaded with ${missing} missing previews. Shift+Click a tile to fix.`);
+  else showToast("Ready.");
+}
+
 async function buildShowcase(queries) {
   stopAudio();
   stopPhysics();
@@ -584,7 +615,7 @@ async function buildShowcase(queries) {
   setMode("showcase");
   showToast("Loading…");
 
-  tracks = await Promise.all(
+  const resolved = await Promise.all(
     reversed.map(async (q) => {
       try {
         const m = await lookupITunesBest(q);
@@ -613,35 +644,7 @@ async function buildShowcase(queries) {
     })
   );
 
-  bubbles = [];
-  for (let i = 0; i < tracks.length; i++) {
-    const rank = i + 1;
-    const meta = tracks[i];
-
-    const size = rankToSizePx(rank);
-    const el = createBubble(rank, meta);
-    el.style.width = `${size}px`;
-    el.style.height = `${size}px`;
-
-    els.stage.appendChild(el);
-
-    bubbles.push({
-      rank,
-      meta,
-      el,
-      x: 0, y: 0,
-      vx: 0, vy: 0,
-      r: size / 2,
-    });
-  }
-
-  attachCursorEvents();
-  layoutInitialBubbles();
-  startPhysics();
-
-  const missing = tracks.filter(t => !t.previewUrl).length;
-  if (missing) showToast(`Loaded with ${missing} missing previews. Shift+Click a tile to paste iTunes link.`);
-  else showToast("Ready.");
+  await buildFromTracksOnly(resolved);
 }
 
 async function handleBuildClick() {
@@ -678,7 +681,7 @@ function handleBack() {
   setMode("import");
 }
 
-// ---------- Init / events ----------
+// ---------- Events / init ----------
 function wireEvents() {
   els.buildBtn.addEventListener("click", () => {
     handleBuildClick().catch(e => setStatus(String(e?.message || e)));
@@ -702,7 +705,6 @@ function wireEvents() {
     if (e.target === els.fixModal) closeFixModal();
   });
 
-  // “Apply” button uses fixSearchBtn now
   els.fixSearchBtn.textContent = "Apply";
   els.fixSearchBtn.addEventListener("click", () => applyFixFromPaste());
 
@@ -720,19 +722,17 @@ function wireEvents() {
 (async function init() {
   wireEvents();
 
-  // Prefer short share links
+  // Share link load (short)
   const idsFromHash = decodeIdsFromHash();
   if (idsFromHash?.length) {
     setMode("showcase");
     setStatus("");
-
     showToast("Loading from share link…");
-    // Lookup all 25 at once
-    const res = await itunesLookupByIds(idsFromHash);
 
-    // Map by id for stable ordering
+    const res = await itunesLookupByIds(idsFromHash);
     const byId = new Map(res.map(r => [r.trackId, r]));
-    tracks = idsFromHash.map((id) => {
+
+    const metas = idsFromHash.map((id) => {
       const r = byId.get(id);
       const artwork = r ? (r.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg") : "";
       return {
@@ -748,25 +748,7 @@ function wireEvents() {
       };
     });
 
-    // render bubbles from tracks
-    els.stage.innerHTML = "";
-    bubbles = [];
-    for (let i = 0; i < tracks.length; i++) {
-      const rank = i + 1;
-      const meta = tracks[i];
-
-      const size = rankToSizePx(rank);
-      const el = createBubble(rank, meta);
-      el.style.width = `${size}px`;
-      el.style.height = `${size}px`;
-
-      els.stage.appendChild(el);
-      bubbles.push({ rank, meta, el, x:0, y:0, vx:0, vy:0, r: size/2 });
-    }
-
-    attachCursorEvents();
-    layoutInitialBubbles();
-    startPhysics();
+    await buildFromTracksOnly(metas);
     showToast("Loaded from share link.");
     return;
   }
