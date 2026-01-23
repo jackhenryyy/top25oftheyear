@@ -49,6 +49,11 @@ let currentPlaying = { rank: null, tile: null };
 const SESSION_KEY = "top25_queries_v8";
 const TOAST_MS = 1500;
 
+// ---- Session helpers ----
+function saveSession(queries) {
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(queries));
+}
+
 function setStatus(msg) {
   els.status.textContent = msg || "";
   console.log("[Top25] status:", msg || "");
