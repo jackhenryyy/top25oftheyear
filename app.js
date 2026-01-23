@@ -34,7 +34,8 @@ const els = {
   fixHint: opt("fixHint"),
 
   // Top 10 Albums
-  albumTiles: Array.from({ length: 10 }, (_, i) => req(`album${i + 1}`))
+  albumTiles: Array.from({ length: 10 }, (_, i) => req(`album${i + 1}`)),
+  albumSection: req("albumSection")
 };
 
 // ---- Global state ----
@@ -61,10 +62,12 @@ function setMode(mode) {
     els.importHeader.classList.add("hidden");
     els.importCard.classList.add("hidden");
     els.showcase.classList.remove("hidden");
+    els.albumSection.classList.remove("hidden"); // Show albums after CSV
   } else {
     els.importHeader.classList.remove("hidden");
     els.importCard.classList.remove("hidden");
     els.showcase.classList.add("hidden");
+    els.albumSection.classList.add("hidden"); // Hide album section initially
   }
 }
 
@@ -211,7 +214,6 @@ function extractTop25QueriesFromCSV(csvText) {
 
 // ---- Showcase Building ----
 async function buildShowcase(queries) {
-  // Implement the showcase rendering logic here
   setMode("showcase");
   showToast("Loading…");
   const resolved = await Promise.all(
