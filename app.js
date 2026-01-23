@@ -324,6 +324,47 @@ async function copyShareLinkFromCurrentTracks() {
 function buildDiamondRows(total = 25) {
   // Center row: [1]
   // Then alternating ABOVE / BELOW with row sizes 2,2,3,3,4,4,...
+  // Special rule: if the very last row would be a single item, merge it into the last bottom row.
+
+  const above = [];
+  const below = [];
+
+  let rank = 2;
+  let size = 2;
+  let placeAbove = true;
+
+  while (rank <= total) {
+    const remaining = total - rank + 1;
+    const take = Math.min(size, remaining);
+
+    const row = [];
+    for (let i = 0; i < take; i++) row.push(rank++);
+
+    if (placeAbove) above.push(row);
+    else below.push(row);
+
+    placeAbove = !placeAbove;
+
+    // increase size after we’ve placed both an above & a below row of this size
+    if (placeAbove) size += 1;
+  }
+
+  // If the last bottom row is a single leftover, merge it into the previous bottom row
+  if (below.length >= 2) {
+    const last = below[below.length - 1];
+    const prev = below[below.length - 2];
+    if (last.length === 1) {
+      prev.push(last[0]);
+      below.pop();
+    }
+  }
+
+  // Render order top→bottom: reverse(above) + center + below
+  return [...above.reverse(), [1], ...below];
+}
+
+  // Center row: [1]
+  // Then alternating ABOVE / BELOW with row sizes 2,2,3,3,4,4,...
   const center = [[1]];
   const above = [];
   const below = [];
