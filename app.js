@@ -1,30 +1,37 @@
 console.log("[Top25] app.js loaded");
 
-const $ = (id) => document.getElementById(id);
+function mustGet(id) {
+  const el = document.getElementById(id);
+  if (!el) {
+    throw new Error(`[Top25] Missing element id="${id}". Check index.html.`);
+  }
+  return el;
+}
 
 const els = {
-  csvFile: $("csvFile"),
-  buildBtn: $("buildBtn"),
-  resetBtn: $("resetBtn"),
-  backBtn: $("backBtn"),
-  copyLinkBtn: $("copyLinkBtn"),
-  status: $("status"),
+  csvFile: mustGet("csvFile"),
+  buildBtn: mustGet("buildBtn"),
+  resetBtn: mustGet("resetBtn"),
+  backBtn: mustGet("backBtn"),
+  copyLinkBtn: mustGet("copyLinkBtn"),
+  status: mustGet("status"),
 
-  importHeader: $("importHeader"),
-  importCard: $("importCard"),
-  showcase: $("showcase"),
+  importHeader: mustGet("importHeader"),
+  importCard: mustGet("importCard"),
+  showcase: mustGet("showcase"),
 
-  grid: $("grid"),
-  toast: $("toast"),
-  audio: $("audio"),
+  grid: mustGet("grid"),
+  toast: mustGet("toast"),
+  audio: mustGet("audio"),
 
-  fixModal: $("fixModal"),
-  closeFixBtn: $("closeFixBtn"),
-  fixTitle: $("fixTitle"),
-  fixQuery: $("fixQuery"),
-  fixApplyBtn: $("fixApplyBtn"),
-  fixHint: $("fixHint"),
+  fixModal: mustGet("fixModal"),
+  closeFixBtn: mustGet("closeFixBtn"),
+  fixTitle: mustGet("fixTitle"),
+  fixQuery: mustGet("fixQuery"),
+  fixApplyBtn: mustGet("fixApplyBtn"),
+  fixHint: mustGet("fixHint"),
 };
+
 
 const STORAGE_KEY = "top25_queries_v5";
 const TOAST_MS = 1600;
