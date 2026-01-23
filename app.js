@@ -2,9 +2,7 @@ console.log("[Top25] app.js loaded");
 
 function mustGet(id) {
   const el = document.getElementById(id);
-  if (!el) {
-    throw new Error(`[Top25] Missing element id="${id}". Check index.html.`);
-  }
+  if (!el) throw new Error(`[Top25] Missing element id="${id}". Check index.html.`);
   return el;
 }
 
@@ -32,8 +30,7 @@ const els = {
   fixHint: mustGet("fixHint"),
 };
 
-
-const STORAGE_KEY = "top25_queries_v5";
+const STORAGE_KEY = "top25_queries_v6";
 const TOAST_MS = 1600;
 
 let tracks = []; // 1..25 meta objects
@@ -323,26 +320,41 @@ async function copyShareLinkFromCurrentTracks() {
   showToast("Share link copied.");
 }
 
-// ---------- Tile layout logic ----------
-function classForRank(rank) {
-  // Match your mockup vibe for first 11; rest become small grid below.
-  // 1 = hero (big)
-  // 2-4 = small
-  // 5-6 = medium
-  // 7-8 = medium
-  // 9-11 = small
-  // 12-25 = small flow
-  if (rank === 1) return "size-hero pos-1";
-  if (rank >= 2 && rank <= 4) return `size-small pos-${rank}`;
-  if (rank >= 5 && rank <= 6) return `size-medium pos-${rank}`;
-  if (rank >= 7 && rank <= 8) return `size-medium pos-${rank}`;
-  if (rank >= 9 && rank <= 11) return `size-small pos-${rank}`;
-  return "size-small restFlow";
+// ---------- Pyramid rows builder ----------
+function buildDiamondRows(total = 25) {
+  // Center row: [1]
+  // Then alternating ABOVE / BELOW with row sizes 2,2,3,3,4,4,...
+  const center = [[1]];
+  const above = [];
+  const below = [];
+
+  let rank = 2;
+  let size = 2;
+  let placeAbove = true;
+
+  while (rank <= total) {
+    const remaining = total - rank + 1;
+    const take = Math.min(size, remaining);
+
+    const row = [];
+    for (let i = 0; i < take; i++) row.push(rank++);
+
+    if (placeAbove) above.push(row);
+    else below.push(row);
+
+    placeAbove = !placeAbove;
+
+    // increase size after we’ve placed both an above & a below row of this size
+    if (placeAbove) size += 1;
+  }
+
+  // Render order top→bottom: reverse(above) + center + below
+  return [...above.reverse(), ...center, ...below];
 }
 
 function createTile(rank, meta) {
   const tile = document.createElement("div");
-  tile.className = `tile ${classForRank(rank)}`;
+  tile.className = "tile" + (rank === 1 ? " hero" : "");
   tile.dataset.rank = String(rank);
 
   const img = document.createElement("img");
@@ -359,10 +371,7 @@ function createTile(rank, meta) {
   tile.appendChild(overlay);
 
   tile.addEventListener("click", (evt) => {
-    if (evt.shiftKey) {
-      openFixModal(rank);
-      return;
-    }
+    if (evt.shiftKey) { openFixModal(rank); return; }
     if (!meta.previewUrl) {
       showToast(`#${rank}: missing preview. Shift+Click to paste iTunes link/ID.`);
       return;
@@ -378,12 +387,22 @@ function createTile(rank, meta) {
   return tile;
 }
 
-function renderGrid() {
+function renderPyramid() {
   stopAudio();
   els.grid.innerHTML = "";
-  for (let i = 0; i < tracks.length; i++) {
-    const rank = i + 1;
-    els.grid.appendChild(createTile(rank, tracks[i]));
+
+  const rows = buildDiamondRows(25);
+
+  for (const rowRanks of rows) {
+    const rowEl = document.createElement("div");
+    rowEl.className = "pyrRow";
+
+    for (const r of rowRanks) {
+      const meta = tracks[r - 1];
+      rowEl.appendChild(createTile(r, meta));
+    }
+
+    els.grid.appendChild(rowEl);
   }
 }
 
@@ -450,7 +469,7 @@ async function applyFixFromPaste() {
       raw: r,
     };
 
-    renderGrid();
+    renderPyramid();
     closeFixModal();
     showToast(`Fixed #${rank}`);
   } catch (e) {
@@ -463,8 +482,7 @@ async function buildShowcase(queries) {
   stopAudio();
   els.grid.innerHTML = "";
 
-  // Reverse so rank #1 becomes the end of playlist if that's your rule:
-  // If you want normal order (1=first row), remove .reverse()
+  // Keep this if you want #1 = last in playlist.
   const reversed = [...queries].reverse();
 
   saveSession(queries);
@@ -499,7 +517,7 @@ async function buildShowcase(queries) {
   );
 
   tracks = resolved.slice(0, 25);
-  renderGrid();
+  renderPyramid();
 
   const missing = tracks.filter(t => !t.previewUrl).length;
   if (missing) showToast(`Loaded with ${missing} missing previews. Shift+Click to fix.`);
@@ -548,11 +566,8 @@ function wireEvents() {
   els.backBtn.addEventListener("click", handleBack);
 
   els.copyLinkBtn.addEventListener("click", async () => {
-    try {
-      await copyShareLinkFromCurrentTracks();
-    } catch {
-      showToast("Copy failed (clipboard blocked).");
-    }
+    try { await copyShareLinkFromCurrentTracks(); }
+    catch { showToast("Copy failed (clipboard blocked)."); }
   });
 
   els.audio.addEventListener("ended", () => stopAudio());
@@ -596,7 +611,7 @@ function wireEvents() {
       };
     }).slice(0, 25);
 
-    renderGrid();
+    renderPyramid();
     showToast("Loaded from share link.");
     return;
   }
