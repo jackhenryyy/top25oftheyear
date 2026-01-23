@@ -319,7 +319,6 @@ async function copyShareLinkFromCurrentTracks() {
   await navigator.clipboard.writeText(url);
   showToast("Share link copied.");
 }
-
 // ---------- Pyramid rows builder ----------
 function buildDiamondRows(total = 25) {
   // Center row: [1]
