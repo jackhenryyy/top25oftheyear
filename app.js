@@ -8,36 +8,31 @@ const els = {
   resetBtn: $("resetBtn"),
   backBtn: $("backBtn"),
   copyLinkBtn: $("copyLinkBtn"),
-  downloadArtBtn: $("downloadArtBtn"),
   status: $("status"),
+
   importHeader: $("importHeader"),
   importCard: $("importCard"),
   showcase: $("showcase"),
-  stage: $("stage"),
-  audio: $("audio"),
+
+  grid: $("grid"),
   toast: $("toast"),
+  audio: $("audio"),
 
   fixModal: $("fixModal"),
   closeFixBtn: $("closeFixBtn"),
   fixTitle: $("fixTitle"),
   fixQuery: $("fixQuery"),
-  fixSearchBtn: $("fixSearchBtn"),
+  fixApplyBtn: $("fixApplyBtn"),
   fixHint: $("fixHint"),
-  fixResults: $("fixResults"),
 };
 
 const STORAGE_KEY = "top25_queries_v5";
 const TOAST_MS = 1600;
 
-let queriesSession = null;
-let tracks = [];     // rank order (1..25)
-let bubbles = [];
-let rafId = null;
+let tracks = []; // 1..25 meta objects
+let fixingRank = null;
 
 let currentPlaying = { rank: null, tile: null };
-
-let cursor = { x: 0, y: 0, active: false };
-let fixingRank = null;
 
 // ---------- UI ----------
 function setStatus(msg) {
@@ -85,6 +80,7 @@ function togglePlay(rank, previewUrl, tile) {
   showToast(`Playing #${rank}`);
 }
 
+// ---------- Session ----------
 function saveSession(queries) {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(queries));
 }
@@ -97,91 +93,7 @@ function clearSession() {
   sessionStorage.removeItem(STORAGE_KEY);
 }
 
-// ---------- NEW: Batch download album art ----------
-function sanitizeFileName(name) {
-  return String(name || "")
-    .replace(/[\/\\?%*:|"<>]/g, "-")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 90);
-}
-
-function blobToDownload(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
-}
-
-async function fetchAsBlob(url) {
-  const resp = await fetch(url, { mode: "cors" });
-  if (!resp.ok) throw new Error(`Failed fetch (${resp.status})`);
-  return await resp.blob();
-}
-
-async function downloadAlbumArtZip() {
-  if (!window.JSZip) {
-    showToast("JSZip failed to load. Refresh and try again.");
-    return;
-  }
-  if (!tracks?.length) {
-    showToast("No tracks loaded yet.");
-    return;
-  }
-
-  // Only those with artwork
-  const items = tracks
-    .map((t, i) => ({ rank: i + 1, ...t }))
-    .filter(t => t.artworkUrl);
-
-  if (!items.length) {
-    showToast("No artwork URLs found.");
-    return;
-  }
-
-  els.downloadArtBtn.disabled = true;
-  els.downloadArtBtn.textContent = "Downloading…";
-  showToast("Downloading album art…");
-
-  const zip = new JSZip();
-
-  // Fetch sequentially to avoid hammering / being blocked
-  let ok = 0;
-  for (let i = 0; i < items.length; i++) {
-    const t = items[i];
-    try {
-      const blob = await fetchAsBlob(t.artworkUrl);
-      const ext = (blob.type && blob.type.includes("png")) ? "png" : "jpg";
-
-      const fileBase =
-        `${String(t.rank).padStart(2, "0")}` +
-        ` - ${sanitizeFileName(t.artistName || "Unknown Artist")}` +
-        ` - ${sanitizeFileName(t.trackName || "Unknown Track")}`;
-
-      zip.file(`${fileBase}.${ext}`, blob);
-      ok++;
-      setStatus(`Album art: ${ok}/${items.length}`);
-    } catch (e) {
-      console.warn("[Top25] art download failed:", t.rank, t.artworkUrl, e);
-    }
-  }
-
-  setStatus("");
-  showToast(`Zipping ${ok}/${items.length} images…`);
-
-  const zipBlob = await zip.generateAsync({ type: "blob" });
-  blobToDownload(zipBlob, "top-25-album-art.zip");
-
-  els.downloadArtBtn.disabled = false;
-  els.downloadArtBtn.textContent = "Download Album Art (ZIP)";
-  showToast("ZIP downloaded.");
-}
-
-// ---------- CSV ----------
+// ---------- CSV parsing ----------
 function readFileAsText(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -375,14 +287,13 @@ async function lookupITunesBest(q) {
   };
 }
 
-// ---------- Share link v2: base36 IDs ----------
+// ---------- Share links (base36 IDs) ----------
 function toBase36(n){ return Number(n).toString(36); }
 function fromBase36(s){ return parseInt(s, 36); }
 
 function encodeIdsToHash(trackIds) {
   return `#ids=${trackIds.map(toBase36).join(".")}`;
 }
-
 function decodeIdsFromHash() {
   const hash = window.location.hash || "";
   if (!hash.startsWith("#ids=")) return null;
@@ -405,24 +316,31 @@ async function copyShareLinkFromCurrentTracks() {
   showToast("Share link copied.");
 }
 
-// ---------- Floating physics ----------
-function rankToSizePx(rank) {
-  const max = 340;
-  const min = 110;
-  const t = (rank - 1) / 24;
-  const eased = Math.pow(t, 0.82);
-  return Math.round(max - (max - min) * eased);
+// ---------- Tile layout logic ----------
+function classForRank(rank) {
+  // Match your mockup vibe for first 11; rest become small grid below.
+  // 1 = hero (big)
+  // 2-4 = small
+  // 5-6 = medium
+  // 7-8 = medium
+  // 9-11 = small
+  // 12-25 = small flow
+  if (rank === 1) return "size-hero pos-1";
+  if (rank >= 2 && rank <= 4) return `size-small pos-${rank}`;
+  if (rank >= 5 && rank <= 6) return `size-medium pos-${rank}`;
+  if (rank >= 7 && rank <= 8) return `size-medium pos-${rank}`;
+  if (rank >= 9 && rank <= 11) return `size-small pos-${rank}`;
+  return "size-small restFlow";
 }
 
-function createBubble(rank, meta) {
-  const el = document.createElement("div");
-  el.className = `bubble rank-${rank}`;
-  el.dataset.rank = String(rank);
+function createTile(rank, meta) {
+  const tile = document.createElement("div");
+  tile.className = `tile ${classForRank(rank)}`;
+  tile.dataset.rank = String(rank);
 
   const img = document.createElement("img");
   img.src = meta.artworkUrl || "";
-  img.alt = meta.trackName || `#${rank}`;
-  img.crossOrigin = "anonymous";
+  img.alt = meta.trackName ? `${meta.trackName} — ${meta.artistName}` : `#${rank}`;
 
   const overlay = document.createElement("div");
   overlay.className = "overlay";
@@ -430,150 +348,42 @@ function createBubble(rank, meta) {
   span.textContent = String(rank);
   overlay.appendChild(span);
 
-  el.appendChild(img);
-  el.appendChild(overlay);
+  tile.appendChild(img);
+  tile.appendChild(overlay);
 
-  el.addEventListener("click", (evt) => {
+  tile.addEventListener("click", (evt) => {
     if (evt.shiftKey) {
       openFixModal(rank);
       return;
     }
-    const b = bubbles.find(x => x.rank === rank);
-    if (!b?.meta?.previewUrl) {
-      showToast(`#${rank}: missing preview. Shift+Click to paste iTunes link.`);
+    if (!meta.previewUrl) {
+      showToast(`#${rank}: missing preview. Shift+Click to paste iTunes link/ID.`);
       return;
     }
-    togglePlay(rank, b.meta.previewUrl, el);
+    togglePlay(rank, meta.previewUrl, tile);
   });
 
-  el.addEventListener("contextmenu", (evt) => {
+  tile.addEventListener("contextmenu", (evt) => {
     evt.preventDefault();
     openFixModal(rank);
   });
 
-  return el;
+  return tile;
 }
 
-function layoutInitialBubbles() {
-  const rect = els.stage.getBoundingClientRect();
-  const W = rect.width;
-  const H = rect.height;
-
-  for (let i = 0; i < bubbles.length; i++) {
-    const b = bubbles[i];
-    b.x = b.r + Math.random() * (W - 2*b.r);
-    b.y = b.r + Math.random() * (H - 2*b.r);
-    b.vx = (Math.random() - 0.5) * 0.4;
-    b.vy = (Math.random() - 0.5) * 0.4;
+function renderGrid() {
+  stopAudio();
+  els.grid.innerHTML = "";
+  for (let i = 0; i < tracks.length; i++) {
+    const rank = i + 1;
+    els.grid.appendChild(createTile(rank, tracks[i]));
   }
-}
-
-function attachCursorEvents() {
-  els.stage.addEventListener("mousemove", (e) => {
-    const rect = els.stage.getBoundingClientRect();
-    cursor.x = e.clientX - rect.left;
-    cursor.y = e.clientY - rect.top;
-    cursor.active = true;
-  });
-  els.stage.addEventListener("mouseleave", () => {
-    cursor.active = false;
-  });
-}
-
-function stepPhysics() {
-  const rect = els.stage.getBoundingClientRect();
-  const W = rect.width;
-  const H = rect.height;
-
-  // slower + smoother + less jumpy
-  const damping = 0.996;
-  const wander = 0.006;
-  const cursorForce = 0.05;
-  const range = 220;
-  const bubbleRepel = 0.35;
-  const centerPull = 0.00025;
-
-  for (const b of bubbles) {
-    b.vx += (Math.random() - 0.5) * wander;
-    b.vy += (Math.random() - 0.5) * wander;
-
-    b.vx += (W/2 - b.x) * centerPull;
-    b.vy += (H/2 - b.y) * centerPull;
-
-    if (cursor.active) {
-      const dx = b.x - cursor.x;
-      const dy = b.y - cursor.y;
-      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-      if (dist < range) {
-        const k = (1 - dist / range) * cursorForce;
-        b.vx += (dx / dist) * k;
-        b.vy += (dy / dist) * k;
-      }
-    }
-
-    b.vx *= damping;
-    b.vy *= damping;
-
-    const maxSpeed = 1.1;
-    const sp = Math.sqrt(b.vx*b.vx + b.vy*b.vy) || 0;
-    if (sp > maxSpeed) {
-      b.vx = (b.vx / sp) * maxSpeed;
-      b.vy = (b.vy / sp) * maxSpeed;
-    }
-  }
-
-  for (let i = 0; i < bubbles.length; i++) {
-    for (let j = i + 1; j < bubbles.length; j++) {
-      const a = bubbles[i];
-      const c = bubbles[j];
-      const dx = c.x - a.x;
-      const dy = c.y - a.y;
-      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-
-      const minDist = (a.r + c.r) * 0.90;
-      if (dist < minDist) {
-        const overlap = (minDist - dist) / minDist;
-        const push = overlap * bubbleRepel * 2.0;
-        const ux = dx / dist;
-        const uy = dy / dist;
-        a.vx -= ux * push;
-        a.vy -= uy * push;
-        c.vx += ux * push;
-        c.vy += uy * push;
-      }
-    }
-  }
-
-  for (const b of bubbles) {
-    b.x += b.vx;
-    b.y += b.vy;
-
-    const pad = b.r + 10;
-    if (b.x < pad) { b.x = pad; b.vx *= -0.5; }
-    if (b.x > W - pad) { b.x = W - pad; b.vx *= -0.5; }
-    if (b.y < pad) { b.y = pad; b.vy *= -0.5; }
-    if (b.y > H - pad) { b.y = H - pad; b.vy *= -0.5; }
-
-    b.el.style.transform = `translate(${(b.x - b.r).toFixed(1)}px, ${(b.y - b.r).toFixed(1)}px)`;
-  }
-
-  rafId = requestAnimationFrame(stepPhysics);
-}
-
-function startPhysics() {
-  stopPhysics();
-  rafId = requestAnimationFrame(stepPhysics);
-}
-function stopPhysics() {
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId = null;
 }
 
 // ---------- Fix modal ----------
 function extractTrackId(input) {
   const s = String(input || "").trim();
   if (!s) return null;
-
   if (/^\d+$/.test(s)) return Number(s);
 
   const m1 = s.match(/[?&]i=(\d+)/);
@@ -621,27 +431,19 @@ async function applyFixFromPaste() {
     }
 
     const artwork = (r.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
-    const replaced = {
+
+    tracks[rank - 1] = {
       trackId: r.trackId || id,
-      trackName: r.trackName || tracks[rank - 1].trackName,
-      artistName: r.artistName || tracks[rank - 1].artistName,
-      albumName: r.collectionName || tracks[rank - 1].albumName,
-      artworkUrl: artwork || tracks[rank - 1].artworkUrl,
+      trackName: r.trackName || tracks[rank - 1]?.trackName || `#${rank}`,
+      artistName: r.artistName || tracks[rank - 1]?.artistName || "",
+      albumName: r.collectionName || tracks[rank - 1]?.albumName || "",
+      artworkUrl: artwork || tracks[rank - 1]?.artworkUrl || "",
       previewUrl: r.previewUrl || null,
       trackViewUrl: r.trackViewUrl || null,
-      score: 999,
       raw: r,
     };
 
-    tracks[rank - 1] = replaced;
-
-    const b = bubbles.find(x => x.rank === rank);
-    if (b) {
-      b.meta = replaced;
-      const img = b.el.querySelector("img");
-      img.src = replaced.artworkUrl || "";
-    }
-
+    renderGrid();
     closeFixModal();
     showToast(`Fixed #${rank}`);
   } catch (e) {
@@ -650,43 +452,13 @@ async function applyFixFromPaste() {
 }
 
 // ---------- Build ----------
-async function buildFromTracksOnly(trackMetas) {
-  stopAudio();
-  stopPhysics();
-  els.stage.innerHTML = "";
-
-  tracks = trackMetas.slice(0,25);
-
-  bubbles = [];
-  for (let i = 0; i < tracks.length; i++) {
-    const rank = i + 1;
-    const meta = tracks[i];
-
-    const size = rankToSizePx(rank);
-    const el = createBubble(rank, meta);
-    el.style.width = `${size}px`;
-    el.style.height = `${size}px`;
-
-    els.stage.appendChild(el);
-    bubbles.push({ rank, meta, el, x:0, y:0, vx:0, vy:0, r: size/2 });
-  }
-
-  attachCursorEvents();
-  layoutInitialBubbles();
-  startPhysics();
-
-  const missing = tracks.filter(t => !t.previewUrl).length;
-  if (missing) showToast(`Loaded with ${missing} missing previews. Shift+Click a tile to fix.`);
-  else showToast("Ready.");
-}
-
 async function buildShowcase(queries) {
   stopAudio();
-  stopPhysics();
-  els.stage.innerHTML = "";
+  els.grid.innerHTML = "";
 
+  // Reverse so rank #1 becomes the end of playlist if that's your rule:
+  // If you want normal order (1=first row), remove .reverse()
   const reversed = [...queries].reverse();
-  queriesSession = queries;
 
   saveSession(queries);
   setMode("showcase");
@@ -703,8 +475,7 @@ async function buildShowcase(queries) {
           albumName: q.album,
           artworkUrl: "",
           previewUrl: null,
-          score: 0,
-          raw: null,
+          trackViewUrl: null,
         };
       } catch {
         return {
@@ -714,14 +485,18 @@ async function buildShowcase(queries) {
           albumName: q.album,
           artworkUrl: "",
           previewUrl: null,
-          score: 0,
-          raw: null,
+          trackViewUrl: null,
         };
       }
     })
   );
 
-  await buildFromTracksOnly(resolved);
+  tracks = resolved.slice(0, 25);
+  renderGrid();
+
+  const missing = tracks.filter(t => !t.previewUrl).length;
+  if (missing) showToast(`Loaded with ${missing} missing previews. Shift+Click to fix.`);
+  else showToast("Ready.");
 }
 
 async function handleBuildClick() {
@@ -743,12 +518,11 @@ async function handleBuildClick() {
 
 function handleReset() {
   stopAudio();
-  stopPhysics();
   els.csvFile.value = "";
   clearSession();
   window.location.hash = "";
   setMode("import");
-  els.stage.innerHTML = "";
+  els.grid.innerHTML = "";
   setStatus("");
   els.toast.classList.add("hidden");
 }
@@ -774,14 +548,6 @@ function wireEvents() {
     }
   });
 
-  els.downloadArtBtn.addEventListener("click", async () => {
-    try {
-      await downloadAlbumArtZip();
-    } catch {
-      showToast("Album art download failed.");
-    }
-  });
-
   els.audio.addEventListener("ended", () => stopAudio());
 
   els.closeFixBtn.addEventListener("click", closeFixModal);
@@ -789,17 +555,10 @@ function wireEvents() {
     if (e.target === els.fixModal) closeFixModal();
   });
 
-  els.fixSearchBtn.textContent = "Apply";
-  els.fixSearchBtn.addEventListener("click", () => applyFixFromPaste());
-
+  els.fixApplyBtn.addEventListener("click", () => applyFixFromPaste());
   els.fixQuery.addEventListener("keydown", (e) => {
     if (e.key === "Enter") applyFixFromPaste();
     if (e.key === "Escape") closeFixModal();
-  });
-
-  window.addEventListener("resize", () => {
-    if (!bubbles.length) return;
-    layoutInitialBubbles();
   });
 }
 
@@ -815,7 +574,7 @@ function wireEvents() {
     const res = await itunesLookupByIds(idsFromHash);
     const byId = new Map(res.map(r => [r.trackId, r]));
 
-    const metas = idsFromHash.map((id) => {
+    tracks = idsFromHash.map((id) => {
       const r = byId.get(id);
       const artwork = r ? (r.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg") : "";
       return {
@@ -826,12 +585,11 @@ function wireEvents() {
         artworkUrl: artwork || r?.artworkUrl100 || "",
         previewUrl: r?.previewUrl || null,
         trackViewUrl: r?.trackViewUrl || null,
-        score: 999,
         raw: r || null,
       };
-    });
+    }).slice(0, 25);
 
-    await buildFromTracksOnly(metas);
+    renderGrid();
     showToast("Loaded from share link.");
     return;
   }
