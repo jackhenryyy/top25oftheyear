@@ -1,5 +1,3 @@
-// app.js (debuggable + robust)
-
 console.log("[Top25] app.js loaded");
 
 const els = {
@@ -7,6 +5,7 @@ const els = {
   buildBtn: document.getElementById("buildBtn"),
   resetBtn: document.getElementById("resetBtn"),
   backBtn: document.getElementById("backBtn"),
+  copyLinkBtn: document.getElementById("copyLinkBtn"),
   status: document.getElementById("status"),
   importHeader: document.getElementById("importHeader"),
   importCard: document.getElementById("importCard"),
@@ -16,17 +15,17 @@ const els = {
   toast: document.getElementById("toast"),
 };
 
-const STORAGE_KEY = "top25_queries_v1";
+const STORAGE_KEY = "top25_queries_v2";
 const TOAST_MS = 1800;
 
+let currentPlaying = { rank: null, previewUrl: null, tileEl: null };
+
 function setStatus(msg) {
-  if (!els.status) return;
   els.status.textContent = msg || "";
   console.log("[Top25] status:", msg || "");
 }
 
 function showToast(msg) {
-  if (!els.toast) return;
   els.toast.textContent = msg || "";
   els.toast.classList.remove("hidden");
   window.clearTimeout(showToast._t);
@@ -34,17 +33,30 @@ function showToast(msg) {
 }
 
 function stopAudio() {
-  if (!els.audio) return;
   els.audio.pause();
   els.audio.src = "";
+  currentPlaying = { rank: null, previewUrl: null, tileEl: null };
 }
 
-function playPreview(url) {
-  if (!els.audio) return;
-  stopAudio();
-  els.audio.src = url;
-  els.audio.play().catch((e) => {
-    console.warn("[Top25] audio.play() blocked:", e);
+function togglePlay(rank, previewUrl, tileEl) {
+  // If clicking the same track again, stop.
+  if (currentPlaying.rank === rank) {
+    stopAudio();
+    showToast(`Stopped #${rank}`);
+    tileEl?.classList.remove("is-playing");
+    return;
+  }
+
+  // Start new
+  if (currentPlaying.tileEl) currentPlaying.tileEl.classList.remove("is-playing");
+  currentPlaying = { rank, previewUrl, tileEl };
+
+  els.audio.pause();
+  els.audio.src = previewUrl;
+  els.audio.play().then(() => {
+    tileEl?.classList.add("is-playing");
+  }).catch((e) => {
+    console.warn("[Top25] audio.play blocked:", e);
   });
 }
 
@@ -57,10 +69,9 @@ function readFileAsText(file) {
   });
 }
 
-// CSV parser (quoted cells supported)
+// ---------- CSV ----------
 function parseCSV(text) {
   if (!text) return [];
-  // Strip UTF-8 BOM if present
   text = text.replace(/^\uFEFF/, "");
 
   const rows = [];
@@ -72,22 +83,10 @@ function parseCSV(text) {
     const ch = text[i];
     const next = text[i + 1];
 
-    if (ch === '"' && inQuotes && next === '"') {
-      cell += '"';
-      i++;
-      continue;
-    }
+    if (ch === '"' && inQuotes && next === '"') { cell += '"'; i++; continue; }
+    if (ch === '"') { inQuotes = !inQuotes; continue; }
 
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (ch === "," && !inQuotes) {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
+    if (ch === "," && !inQuotes) { row.push(cell); cell = ""; continue; }
 
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
       if (ch === "\r" && next === "\n") i++;
@@ -106,7 +105,6 @@ function parseCSV(text) {
   return rows;
 }
 
-// Robust header matching for your CSV
 function extractTop25QueriesFromCSV(csvText) {
   const rows = parseCSV(csvText);
   if (!rows.length) return [];
@@ -127,7 +125,7 @@ function extractTop25QueriesFromCSV(csvText) {
   const albumIdx = findCol(h => h === "album name" || h.includes("album name"));
 
   if (trackNameIdx === -1 || artistIdx === -1) {
-    console.warn("[Top25] Header row:", headerRaw);
+    console.warn("[Top25] header row:", headerRaw);
     return [];
   }
 
@@ -143,43 +141,99 @@ function extractTop25QueriesFromCSV(csvText) {
   return out.slice(0, 25);
 }
 
-// iTunes Search API (no auth)
-async function lookupITunes(q) {
-  const primaryArtist = (q.artist || "").split(",")[0].trim();
-  const term = `${q.track} ${primaryArtist}`.trim();
+// ---------- iTunes matching ----------
+function norm(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[\(\)\[\]\{\}]/g, " ")
+    .replace(/feat\.|ft\./g, "feat")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=10`;
+function includesLoose(hay, needle) {
+  const h = norm(hay);
+  const n = norm(needle);
+  if (!h || !n) return false;
+  return h.includes(n);
+}
 
+async function itunesSearch(term, limit = 12) {
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=${limit}`;
   const resp = await fetch(url);
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => "");
-    throw new Error(`iTunes search failed (${resp.status}). ${txt}`);
+  if (!resp.ok) throw new Error(`iTunes search failed (${resp.status})`);
+  const data = await resp.json();
+  return (data.results || []);
+}
+
+function scoreResult(q, r) {
+  const qTrack = norm(q.track);
+  const qArtist = norm((q.artist || "").split(",")[0].trim());
+  const qAlbum = norm(q.album);
+
+  const rTrack = norm(r.trackName);
+  const rArtist = norm(r.artistName);
+  const rAlbum = norm(r.collectionName);
+
+  let s = 0;
+
+  // track match
+  if (rTrack === qTrack) s += 10;
+  if (rTrack.includes(qTrack)) s += 6;
+  if (qTrack.includes(rTrack)) s += 4;
+
+  // artist match
+  if (rArtist === qArtist) s += 10;
+  if (rArtist.includes(qArtist)) s += 7;
+
+  // album tie-breaker (huge for fixing wrong versions)
+  if (qAlbum) {
+    if (rAlbum === qAlbum) s += 10;
+    if (rAlbum.includes(qAlbum) || qAlbum.includes(rAlbum)) s += 6;
   }
 
-  const data = await resp.json();
-  const results = data.results || [];
+  // penalize karaoke/tribute
+  if (rArtist.includes("karaoke") || rArtist.includes("tribute")) s -= 15;
+
+  return s;
+}
+
+async function lookupITunesBest(q) {
+  const primaryArtist = (q.artist || "").split(",")[0].trim();
+
+  // First pass: include album if we have it
+  const term1 = q.album
+    ? `${q.track} ${primaryArtist} ${q.album}`
+    : `${q.track} ${primaryArtist}`;
+
+  let results = await itunesSearch(term1, 12);
+
+  // If first pass yields weak results, try a simpler term without album
+  if (!results.length) {
+    const term2 = `${q.track} ${primaryArtist}`;
+    results = await itunesSearch(term2, 12);
+  }
+
   if (!results.length) return null;
 
-  const t = q.track.toLowerCase();
-  const a = primaryArtist.toLowerCase();
-
-  const score = (r) => {
-    const rt = (r.trackName || "").toLowerCase();
-    const ra = (r.artistName || "").toLowerCase();
-    let s = 0;
-    if (rt === t) s += 7;
-    if (ra === a) s += 5;
-    if (rt.includes(t)) s += 3;
-    if (ra.includes(a)) s += 4;
-    if (ra.includes("karaoke") || ra.includes("tribute")) s -= 8;
-    return s;
-  };
-
+  // pick best by score
   let best = results[0];
-  let bestScore = score(best);
+  let bestScore = scoreResult(q, best);
+
   for (const r of results) {
-    const sc = score(r);
+    const sc = scoreResult(q, r);
     if (sc > bestScore) { best = r; bestScore = sc; }
+  }
+
+  // If score is still low, attempt a third pass: track+album (sometimes artist strings differ)
+  if (bestScore < 14 && q.album) {
+    const term3 = `${q.track} ${q.album}`;
+    const more = await itunesSearch(term3, 12);
+    for (const r of more) {
+      const sc = scoreResult(q, r);
+      if (sc > bestScore) { best = r; bestScore = sc; }
+    }
   }
 
   const artwork = (best.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
@@ -187,17 +241,18 @@ async function lookupITunes(q) {
   return {
     trackName: best.trackName || q.track,
     artistName: best.artistName || q.artist,
+    albumName: best.collectionName || q.album,
     artworkUrl: artwork || best.artworkUrl100 || "",
     previewUrl: best.previewUrl || null,
+    score: bestScore,
   };
 }
 
-// Luminance for adaptive overlay
+// ---------- Overlay contrast ----------
 async function computeLuminance(imgEl) {
   const w = 32, h = 32;
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(imgEl, 0, 0, w, h);
   const data = ctx.getImageData(0, 0, w, h).data;
@@ -214,76 +269,74 @@ async function computeLuminance(imgEl) {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
-// Spiral positions in 9x9 centered at (5,5)
-function spiralPositions(count) {
-  const positions = [];
-  let x = 5, y = 5;
-  positions.push({ x, y });
-
-  let step = 1;
-  while (positions.length < count) {
-    for (const [dx, dy] of [[1,0],[0,1],[-1,0],[0,-1]]) {
-      const moves = step;
-      for (let i = 0; i < moves; i++) {
-        if (positions.length >= count) break;
-        x += dx; y += dy;
-        if (x >= 1 && x <= 9 && y >= 1 && y <= 9) positions.push({ x, y });
-      }
-      if (dx === 0 && dy === 1) step++;
-      if (dx === 0 && dy === -1) step++;
-    }
-  }
-
-  return positions.slice(0, count);
+// ---------- Share link ----------
+function encodeListToHash(queries) {
+  // Keep small: only fields needed to reproduce list
+  const compact = queries.map(q => ({ t: q.track, a: q.artist, al: q.album || "" }));
+  const json = JSON.stringify(compact);
+  const b64 = btoa(unescape(encodeURIComponent(json)));
+  return `#list=${b64}`;
 }
 
+function decodeListFromHash() {
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#list=")) return null;
+
+  const b64 = hash.slice("#list=".length);
+  try {
+    const json = decodeURIComponent(escape(atob(b64)));
+    const compact = JSON.parse(json);
+    if (!Array.isArray(compact)) return null;
+    return compact.slice(0, 25).map(x => ({
+      track: x.t || "",
+      artist: x.a || "",
+      album: x.al || "",
+    })).filter(x => x.track && x.artist);
+  } catch (e) {
+    console.warn("[Top25] failed to decode hash list", e);
+    return null;
+  }
+}
+
+async function copyShareLink(queries) {
+  const base = `${window.location.origin}${window.location.pathname}`;
+  const url = `${base}${encodeListToHash(queries)}`;
+  await navigator.clipboard.writeText(url);
+  showToast("Share link copied.");
+}
+
+// ---------- UI ----------
 function setMode(mode) {
   if (mode === "showcase") {
-    els.importHeader?.classList.add("hidden");
-    els.importCard?.classList.add("hidden");
-    els.showcase?.classList.remove("hidden");
+    els.importHeader.classList.add("hidden");
+    els.importCard.classList.add("hidden");
+    els.showcase.classList.remove("hidden");
   } else {
-    els.importHeader?.classList.remove("hidden");
-    els.importCard?.classList.remove("hidden");
-    els.showcase?.classList.add("hidden");
+    els.importHeader.classList.remove("hidden");
+    els.importCard.classList.remove("hidden");
+    els.showcase.classList.add("hidden");
   }
 }
 
-function saveShowcase(queries) {
+function saveSession(queries) {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(queries));
-  const u = new URL(window.location.href);
-  u.searchParams.set("showcase", "1");
-  history.pushState({}, "", u.toString());
 }
 
-function clearShowcase() {
-  sessionStorage.removeItem(STORAGE_KEY);
-  const u = new URL(window.location.href);
-  u.searchParams.delete("showcase");
-  history.pushState({}, "", u.toString());
-}
-
-function loadShowcase() {
-  const u = new URL(window.location.href);
-  if (u.searchParams.get("showcase") !== "1") return null;
+function loadSession() {
   const raw = sessionStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-function createTile(rank, meta, placement) {
-  const tile = document.createElement("button");
-  tile.className = "tile";
-  tile.type = "button";
+function clearSession() {
+  sessionStorage.removeItem(STORAGE_KEY);
+}
 
-  if (rank === 1) {
-    tile.style.gridColumn = "4 / span 4";
-    tile.style.gridRow = "4 / span 4";
-    tile.style.borderRadius = "18px";
-  } else {
-    tile.style.gridColumn = `${placement.x} / span 1`;
-    tile.style.gridRow = `${placement.y} / span 1`;
-  }
+// Create tile
+function createTile(rank, meta) {
+  const tile = document.createElement("button");
+  tile.className = `tile rank-${rank}`;
+  tile.type = "button";
 
   const img = document.createElement("img");
   img.alt = meta?.trackName ? meta.trackName : `#${rank}`;
@@ -292,6 +345,7 @@ function createTile(rank, meta, placement) {
 
   const overlay = document.createElement("div");
   overlay.className = "overlay";
+
   const num = document.createElement("span");
   num.textContent = String(rank);
   overlay.appendChild(num);
@@ -312,67 +366,74 @@ function createTile(rank, meta, placement) {
     }
   });
 
-  tile.title = meta?.trackName ? `#${rank} — ${meta.trackName} (${meta.artistName || ""})` : `#${rank}`;
-
+  // Click toggles play/stop
   tile.addEventListener("click", () => {
-    if (meta?.previewUrl) {
-      playPreview(meta.previewUrl);
-      showToast(`#${rank}: ${meta.trackName} — ${meta.artistName}`);
-    } else {
-      showToast(`#${rank}: No preview available`);
+    if (!meta?.previewUrl) {
+      showToast(`#${rank}: No preview found (different version / no iTunes preview)`);
+      return;
     }
+    togglePlay(rank, meta.previewUrl, tile);
+    showToast(`#${rank}: ${meta.trackName} — ${meta.artistName}`);
   });
 
   return tile;
 }
 
 async function buildShowcase(queries) {
-  setStatus("");
   stopAudio();
   els.grid.innerHTML = "";
 
-  // Reverse order so CSV row 25 becomes rank #1
+  // Reverse order: playlist row 25 becomes Showcase #1
   const reversed = [...queries].reverse();
 
-  saveShowcase(queries);
+  // Persist and switch mode
+  saveSession(queries);
   setMode("showcase");
 
   showToast("Loading previews...");
 
-  // Fetch iTunes metadata in parallel
+  // Fetch iTunes metadata (parallel)
   const metas = await Promise.all(
     reversed.map(async (q, idx) => {
       try {
-        const m = await lookupITunes(q);
-        return m;
+        const m = await lookupITunesBest(q);
+        if (!m || !m.previewUrl) {
+          console.warn("[Top25] preview missing", idx + 1, q, m);
+        }
+        return m || {
+          trackName: q.track,
+          artistName: q.artist,
+          albumName: q.album,
+          artworkUrl: "",
+          previewUrl: null,
+          score: 0,
+        };
       } catch (e) {
-        console.warn("[Top25] lookup failed idx", idx, q, e);
-        return null;
+        console.warn("[Top25] lookup failed", idx + 1, q, e);
+        return {
+          trackName: q.track,
+          artistName: q.artist,
+          albumName: q.album,
+          artworkUrl: "",
+          previewUrl: null,
+          score: 0,
+        };
       }
     })
   );
 
-  const positions = spiralPositions(25);
-
-  for (let i = 0; i < reversed.length; i++) {
+  // Render as a full-width dense grid
+  for (let i = 0; i < metas.length; i++) {
     const rank = i + 1;
-    const meta = metas[i] || {
-      trackName: reversed[i].track,
-      artistName: reversed[i].artist,
-      artworkUrl: "",
-      previewUrl: null,
-    };
-    const placement = positions[i];
-    els.grid.appendChild(createTile(rank, meta, placement));
+    const tile = createTile(rank, metas[i]);
+    els.grid.appendChild(tile);
   }
 
-  showToast("Ready. Click any cover to play a 30s preview.");
+  showToast("Ready. Click any cover to play. Click again to stop.");
 }
 
 async function handleBuildClick() {
-  console.log("[Top25] Build Showcase clicked");
-
-  const file = els.csvFile?.files?.[0];
+  const file = els.csvFile.files?.[0];
   if (!file) {
     setStatus("Upload your CSV first.");
     return;
@@ -380,12 +441,10 @@ async function handleBuildClick() {
 
   setStatus("Reading CSV...");
   const text = await readFileAsText(file);
-
   const queries = extractTop25QueriesFromCSV(text);
-  console.log("[Top25] extracted queries:", queries.length, queries[0]);
 
   if (!queries.length) {
-    setStatus("Could not parse Track Name + Artist Name(s) from this CSV. Check the header row.");
+    setStatus("Could not parse Track Name + Artist Name(s) from this CSV.");
     return;
   }
 
@@ -393,48 +452,70 @@ async function handleBuildClick() {
   await buildShowcase(queries);
 }
 
-function handleResetClick() {
+function handleReset() {
   stopAudio();
   els.csvFile.value = "";
-  clearShowcase();
+  clearSession();
+  window.location.hash = "";
   setMode("import");
   els.grid.innerHTML = "";
   setStatus("");
-  els.toast?.classList.add("hidden");
-  showToast("Reset.");
+  els.toast.classList.add("hidden");
 }
 
-function handleBackClick() {
+function handleBack() {
   stopAudio();
   setMode("import");
 }
 
+// ---------- Wiring ----------
 function wireEvents() {
-  if (!els.buildBtn) throw new Error("Missing #buildBtn in HTML");
-  if (!els.csvFile) throw new Error("Missing #csvFile in HTML");
-  if (!els.grid) throw new Error("Missing #grid in HTML");
-
   els.buildBtn.addEventListener("click", () => {
     handleBuildClick().catch(e => setStatus(String(e?.message || e)));
   });
-  els.resetBtn?.addEventListener("click", handleResetClick);
-  els.backBtn?.addEventListener("click", handleBackClick);
+  els.resetBtn.addEventListener("click", handleReset);
+  els.backBtn.addEventListener("click", handleBack);
 
-  console.log("[Top25] events wired");
+  els.copyLinkBtn.addEventListener("click", async () => {
+    const queries = loadSession();
+    if (!queries?.length) {
+      showToast("Build a showcase first.");
+      return;
+    }
+    try {
+      await copyShareLink(queries);
+    } catch {
+      showToast("Copy failed. Your browser may block clipboard access.");
+    }
+  });
+
+  // When audio ends, clear playing state
+  els.audio.addEventListener("ended", () => {
+    if (currentPlaying.tileEl) currentPlaying.tileEl.classList.remove("is-playing");
+    currentPlaying = { rank: null, previewUrl: null, tileEl: null };
+  });
 }
 
 (async function init() {
-  try {
-    wireEvents();
-    setStatus("JS loaded. Upload CSV and click Build Showcase.");
-    const saved = loadShowcase();
-    if (saved?.length) {
-      await buildShowcase(saved);
-    } else {
-      setMode("import");
-    }
-  } catch (e) {
-    console.error("[Top25] init error:", e);
-    setStatus(`JS error: ${String(e?.message || e)}`);
+  wireEvents();
+
+  // Priority: share link in hash
+  const fromHash = decodeListFromHash();
+  if (fromHash?.length) {
+    setStatus("");
+    await buildShowcase(fromHash);
+    showToast("Loaded from share link.");
+    return;
   }
+
+  // Otherwise: session restore
+  const saved = loadSession();
+  if (saved?.length) {
+    setStatus("");
+    await buildShowcase(saved);
+    return;
+  }
+
+  setMode("import");
+  setStatus("Upload CSV and click Build Showcase.");
 })();
