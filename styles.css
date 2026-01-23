@@ -21,21 +21,12 @@ body{
   min-height:100vh;
 }
 
-.header{
-  padding:24px 18px 10px;
-}
-.headerInner{
-  max-width: 1200px;
-  margin: 0 auto;
-}
+.header{ padding:24px 18px 10px; }
+.headerInner{ max-width: 1200px; margin: 0 auto; }
 h1{ margin:0 0 6px; font-size:22px; }
 .sub{ margin:0; color:var(--muted); font-size:13px; line-height:1.35; }
 
-.main{
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 18px 32px;
-}
+.main{ max-width: 1200px; margin: 0 auto; padding: 0 18px 32px; }
 
 .card{
   background: rgba(18,18,26,.92);
@@ -80,11 +71,8 @@ h1{ margin:0 0 6px; font-size:22px; }
 
 .hidden{ display:none !important; }
 
-.showcase{
-  margin-top:14px;
-}
+.showcase{ margin-top:14px; }
 
-/* top bar */
 .topBar{
   display:flex;
   align-items:center;
@@ -92,18 +80,9 @@ h1{ margin:0 0 6px; font-size:22px; }
   gap:12px;
   margin-bottom:12px;
 }
-.topBarLeft{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  flex-wrap:wrap;
-}
-.topBarRight{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  justify-content:flex-end;
-}
+.topBarLeft{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.topBarRight{ display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+
 .titlePill{
   font-size:12px;
   letter-spacing:.4px;
@@ -113,43 +92,40 @@ h1{ margin:0 0 6px; font-size:22px; }
   border:1px solid var(--border);
   background: rgba(18,18,26,.92);
 }
-.helperText{
-  color: var(--muted);
-  font-size: 12px;
-}
+.helperText{ color: var(--muted); font-size: 12px; }
 
-/* FULL-PAGE FEEL: grid is wide; it should fill the page */
-.grid{
+/* Floating stage fills viewport-ish area */
+.stage{
+  position: relative;
   width: 100%;
-  display:grid;
-  grid-auto-flow: dense;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  height: min(78vh, 820px);
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: radial-gradient(900px 600px at 30% 20%, rgba(255,255,255,.06) 0%, rgba(255,255,255,0) 60%);
+  overflow: hidden;
 }
 
-/* tile base */
-.tile{
-  position:relative;
-  border-radius:16px;
+/* Tile as floating bubble */
+.bubble{
+  position:absolute;
+  border-radius: 18px;
   overflow:hidden;
-  border:1px solid var(--border);
-  background:#0e0e14;
   cursor:pointer;
-  box-shadow: 0 10px 20px rgba(0,0,0,.22);
-  transition: transform .12s ease;
-  aspect-ratio: 1 / 1;
+  user-select:none;
+  box-shadow: 0 18px 40px rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.10);
+  transform: translateZ(0);
 }
-.tile:hover{ transform: translateY(-2px); }
-
-.tile img{
+.bubble img{
   width:100%;
   height:100%;
   object-fit:cover;
   display:block;
 }
 
-/* Hover overlay */
-.overlay{
+.bubble:hover{ filter: brightness(1.06); }
+
+.bubble .overlay{
   position:absolute;
   inset:0;
   display:flex;
@@ -158,29 +134,25 @@ h1{ margin:0 0 6px; font-size:22px; }
   opacity:0;
   transition: opacity .12s ease;
 }
-.tile:hover .overlay{ opacity:1; }
+.bubble:hover .overlay{ opacity:1; }
 
-.overlay span{
-  font-size:48px;
-  font-weight:950;
-  letter-spacing:1px;
-  padding:10px 18px;
-  border-radius:999px;
+.bubble .overlay span{
+  font-size: 44px;
+  font-weight: 950;
+  padding: 10px 18px;
+  border-radius: 999px;
   border: 1px solid rgba(255,255,255,.18);
 }
 
-/* Rank styling: top 3 borders */
-.rank-1{ border: 3px solid var(--gold); }
-.rank-2{ border: 3px solid var(--silver); }
-.rank-3{ border: 3px solid var(--bronze); }
+/* top 3 borders */
+.rank-1{ border: 4px solid var(--gold); }
+.rank-2{ border: 4px solid var(--silver); }
+.rank-3{ border: 4px solid var(--bronze); }
 
-/* Optional size hierarchy so #1 feels “bigger” without being hidden */
-.rank-1{ grid-column: span 2; grid-row: span 2; }
-.rank-2{ grid-column: span 2; grid-row: span 1; }
-.rank-3{ grid-column: span 1; grid-row: span 2; }
-
-/* ensure big tiles appear above neighbors */
-.rank-1, .rank-2, .rank-3{ z-index: 2; }
+.playing{
+  outline: 3px solid rgba(29,185,84,.55);
+  outline-offset: 2px;
+}
 
 /* Toast */
 .toast{
@@ -201,3 +173,87 @@ h1{ margin:0 0 6px; font-size:22px; }
   white-space: nowrap;
   backdrop-filter: blur(8px);
 }
+
+/* Modal */
+.modal{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 16px;
+  z-index: 1000;
+}
+.modalCard{
+  width: min(920px, 96vw);
+  max-height: min(80vh, 720px);
+  overflow: hidden;
+  background: rgba(18,18,26,.96);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+.modalTop{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.modalTitle{ font-weight: 900; }
+.xBtn{
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.12);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor:pointer;
+}
+.modalBody{ padding: 14px; overflow:auto; max-height: calc(min(80vh, 720px) - 60px); }
+
+.modalRow{ display:flex; gap:10px; }
+.modalInput{
+  flex: 1;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(0,0,0,.22);
+  padding: 12px 12px;
+  color: var(--text);
+}
+.modalHint{ margin-top:10px; font-size: 12px; color: var(--muted); }
+
+.results{
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.resultCard{
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 14px;
+  overflow:hidden;
+  background: rgba(0,0,0,.18);
+  cursor:pointer;
+}
+.resultCard:hover{ filter: brightness(1.05); }
+.resultTop{
+  display:flex;
+  gap:10px;
+  padding: 10px;
+}
+.resultTop img{
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  object-fit:cover;
+}
+.resultMeta{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  min-width: 0;
+}
+.resultTrack{ font-weight: 900; font-size: 13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.resultArtist, .resultAlbum{ font-size: 12px; color: var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
