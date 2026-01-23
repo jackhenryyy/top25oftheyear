@@ -1,3 +1,7 @@
+// app.js (debuggable + robust)
+
+console.log("[Top25] app.js loaded");
+
 const els = {
   csvFile: document.getElementById("csvFile"),
   buildBtn: document.getElementById("buildBtn"),
@@ -12,11 +16,13 @@ const els = {
   toast: document.getElementById("toast"),
 };
 
-const STORAGE_KEY = "top25_queries_v1"; // sessionStorage
+const STORAGE_KEY = "top25_queries_v1";
 const TOAST_MS = 1800;
 
 function setStatus(msg) {
+  if (!els.status) return;
   els.status.textContent = msg || "";
+  console.log("[Top25] status:", msg || "");
 }
 
 function showToast(msg) {
@@ -28,14 +34,18 @@ function showToast(msg) {
 }
 
 function stopAudio() {
+  if (!els.audio) return;
   els.audio.pause();
   els.audio.src = "";
 }
 
 function playPreview(url) {
+  if (!els.audio) return;
   stopAudio();
   els.audio.src = url;
-  els.audio.play().catch(() => {});
+  els.audio.play().catch((e) => {
+    console.warn("[Top25] audio.play() blocked:", e);
+  });
 }
 
 function readFileAsText(file) {
@@ -47,10 +57,11 @@ function readFileAsText(file) {
   });
 }
 
-// CSV parser (handles quoted cells, commas, CRLF)
+// CSV parser (quoted cells supported)
 function parseCSV(text) {
   if (!text) return [];
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  // Strip UTF-8 BOM if present
+  text = text.replace(/^\uFEFF/, "");
 
   const rows = [];
   let row = [];
@@ -61,16 +72,28 @@ function parseCSV(text) {
     const ch = text[i];
     const next = text[i + 1];
 
-    if (ch === '"' && inQuotes && next === '"') { cell += '"'; i++; continue; }
-    if (ch === '"') { inQuotes = !inQuotes; continue; }
+    if (ch === '"' && inQuotes && next === '"') {
+      cell += '"';
+      i++;
+      continue;
+    }
 
-    if (ch === "," && !inQuotes) { row.push(cell); cell = ""; continue; }
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (ch === "," && !inQuotes) {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
 
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
       if (ch === "\r" && next === "\n") i++;
       row.push(cell);
       cell = "";
-      if (row.some(c => c.trim() !== "")) rows.push(row);
+      if (row.some(c => String(c).trim() !== "")) rows.push(row);
       row = [];
       continue;
     }
@@ -79,75 +102,86 @@ function parseCSV(text) {
   }
 
   row.push(cell);
-  if (row.some(c => c.trim() !== "")) rows.push(row);
+  if (row.some(c => String(c).trim() !== "")) rows.push(row);
   return rows;
 }
 
-// Your CSV columns: Track Name, Artist Name(s), Album Name (optional)
+// Robust header matching for your CSV
 function extractTop25QueriesFromCSV(csvText) {
   const rows = parseCSV(csvText);
   if (!rows.length) return [];
 
-  const header = rows[0].map(h => (h || "").trim().toLowerCase());
-  const trackNameIdx = header.indexOf("track name");
-  const artistIdx = header.indexOf("artist name(s)");
-  const albumIdx = header.indexOf("album name");
+  const headerRaw = rows[0].map(h => String(h || ""));
+  const header = headerRaw.map(h =>
+    h.replace(/\uFEFF/g, "").trim().toLowerCase()
+  );
 
-  if (trackNameIdx === -1 || artistIdx === -1) return [];
+  const findCol = (pred) => header.findIndex(pred);
+
+  const trackNameIdx = findCol(h => h === "track name" || h.includes("track name"));
+  const artistIdx = findCol(h =>
+    h === "artist name(s)" ||
+    h === "artist name" ||
+    (h.includes("artist") && h.includes("name"))
+  );
+  const albumIdx = findCol(h => h === "album name" || h.includes("album name"));
+
+  if (trackNameIdx === -1 || artistIdx === -1) {
+    console.warn("[Top25] Header row:", headerRaw);
+    return [];
+  }
 
   const out = [];
   for (let r = 1; r < rows.length; r++) {
-    const cells = rows[r];
-    const track = (cells[trackNameIdx] || "").trim();
-    const artist = (cells[artistIdx] || "").trim();
-    const album = albumIdx !== -1 ? (cells[albumIdx] || "").trim() : "";
+    const cells = rows[r] || [];
+    const track = String(cells[trackNameIdx] || "").trim();
+    const artist = String(cells[artistIdx] || "").trim();
+    const album = albumIdx !== -1 ? String(cells[albumIdx] || "").trim() : "";
     if (track && artist) out.push({ track, artist, album });
   }
+
   return out.slice(0, 25);
 }
 
-// iTunes Search API (no auth). Returns previewUrl + artworkUrl + trackName, artistName
+// iTunes Search API (no auth)
 async function lookupITunes(q) {
   const primaryArtist = (q.artist || "").split(",")[0].trim();
   const term = `${q.track} ${primaryArtist}`.trim();
+
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=10`;
 
   const resp = await fetch(url);
-  if (!resp.ok) throw new Error("iTunes search failed");
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`iTunes search failed (${resp.status}). ${txt}`);
+  }
+
   const data = await resp.json();
   const results = data.results || [];
-
   if (!results.length) return null;
 
-  // Scoring heuristic to reduce mismatches
   const t = q.track.toLowerCase();
   const a = primaryArtist.toLowerCase();
 
-  function score(r) {
+  const score = (r) => {
     const rt = (r.trackName || "").toLowerCase();
     const ra = (r.artistName || "").toLowerCase();
     let s = 0;
-    if (rt === t) s += 6;
-    if (ra.includes(a)) s += 6;
+    if (rt === t) s += 7;
+    if (ra === a) s += 5;
     if (rt.includes(t)) s += 3;
-    if (ra === a) s += 3;
-    // penalize karaoke/tribute if it sneaks in
-    if (ra.includes("karaoke") || ra.includes("tribute")) s -= 6;
+    if (ra.includes(a)) s += 4;
+    if (ra.includes("karaoke") || ra.includes("tribute")) s -= 8;
     return s;
-  }
+  };
 
   let best = results[0];
   let bestScore = score(best);
-
   for (const r of results) {
     const sc = score(r);
-    if (sc > bestScore) {
-      best = r;
-      bestScore = sc;
-    }
+    if (sc > bestScore) { best = r; bestScore = sc; }
   }
 
-  // bigger artwork
   const artwork = (best.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
 
   return {
@@ -180,7 +214,7 @@ async function computeLuminance(imgEl) {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
-// Spiral positions on a 9x9 grid centered at (5,5)
+// Spiral positions in 9x9 centered at (5,5)
 function spiralPositions(count) {
   const positions = [];
   let x = 5, y = 5;
@@ -188,7 +222,6 @@ function spiralPositions(count) {
 
   let step = 1;
   while (positions.length < count) {
-    // right, down, left, up
     for (const [dx, dy] of [[1,0],[0,1],[-1,0],[0,-1]]) {
       const moves = step;
       for (let i = 0; i < moves; i++) {
@@ -200,19 +233,19 @@ function spiralPositions(count) {
       if (dx === 0 && dy === -1) step++;
     }
   }
+
   return positions.slice(0, count);
 }
 
 function setMode(mode) {
-  // mode: "import" | "showcase"
   if (mode === "showcase") {
-    els.importHeader.classList.add("hidden");
-    els.importCard.classList.add("hidden");
-    els.showcase.classList.remove("hidden");
+    els.importHeader?.classList.add("hidden");
+    els.importCard?.classList.add("hidden");
+    els.showcase?.classList.remove("hidden");
   } else {
-    els.importHeader.classList.remove("hidden");
-    els.importCard.classList.remove("hidden");
-    els.showcase.classList.add("hidden");
+    els.importHeader?.classList.remove("hidden");
+    els.importCard?.classList.remove("hidden");
+    els.showcase?.classList.add("hidden");
   }
 }
 
@@ -243,7 +276,6 @@ function createTile(rank, meta, placement) {
   tile.className = "tile";
   tile.type = "button";
 
-  // Center tile (#1) in the middle, 4x4 span (2× bigger concept)
   if (rank === 1) {
     tile.style.gridColumn = "4 / span 4";
     tile.style.gridRow = "4 / span 4";
@@ -260,7 +292,6 @@ function createTile(rank, meta, placement) {
 
   const overlay = document.createElement("div");
   overlay.className = "overlay";
-
   const num = document.createElement("span");
   num.textContent = String(rank);
   overlay.appendChild(num);
@@ -268,7 +299,6 @@ function createTile(rank, meta, placement) {
   tile.appendChild(img);
   tile.appendChild(overlay);
 
-  // Adaptive overlay coloring
   img.addEventListener("load", async () => {
     try {
       const lum = await computeLuminance(img);
@@ -301,18 +331,24 @@ async function buildShowcase(queries) {
   stopAudio();
   els.grid.innerHTML = "";
 
-  // Reverse: playlist row 25 becomes rank #1
+  // Reverse order so CSV row 25 becomes rank #1
   const reversed = [...queries].reverse();
+
   saveShowcase(queries);
   setMode("showcase");
 
   showToast("Loading previews...");
 
-  // Look up iTunes metadata in parallel (25 calls)
+  // Fetch iTunes metadata in parallel
   const metas = await Promise.all(
-    reversed.map(async (q) => {
-      try { return await lookupITunes(q); }
-      catch { return null; }
+    reversed.map(async (q, idx) => {
+      try {
+        const m = await lookupITunes(q);
+        return m;
+      } catch (e) {
+        console.warn("[Top25] lookup failed idx", idx, q, e);
+        return null;
+      }
     })
   );
 
@@ -334,19 +370,25 @@ async function buildShowcase(queries) {
 }
 
 async function handleBuildClick() {
-  const file = els.csvFile.files?.[0];
+  console.log("[Top25] Build Showcase clicked");
+
+  const file = els.csvFile?.files?.[0];
   if (!file) {
     setStatus("Upload your CSV first.");
     return;
   }
+
   setStatus("Reading CSV...");
   const text = await readFileAsText(file);
+
   const queries = extractTop25QueriesFromCSV(text);
+  console.log("[Top25] extracted queries:", queries.length, queries[0]);
 
   if (!queries.length) {
-    setStatus("Could not parse Track Name + Artist Name(s) from this CSV.");
+    setStatus("Could not parse Track Name + Artist Name(s) from this CSV. Check the header row.");
     return;
   }
+
   setStatus("");
   await buildShowcase(queries);
 }
@@ -358,7 +400,8 @@ function handleResetClick() {
   setMode("import");
   els.grid.innerHTML = "";
   setStatus("");
-  if (els.toast) els.toast.classList.add("hidden");
+  els.toast?.classList.add("hidden");
+  showToast("Reset.");
 }
 
 function handleBackClick() {
@@ -366,23 +409,32 @@ function handleBackClick() {
   setMode("import");
 }
 
-els.buildBtn.addEventListener("click", () => {
-  handleBuildClick().catch(e => setStatus(String(e?.message || e)));
-});
-els.resetBtn.addEventListener("click", handleResetClick);
-els.backBtn.addEventListener("click", handleBackClick);
+function wireEvents() {
+  if (!els.buildBtn) throw new Error("Missing #buildBtn in HTML");
+  if (!els.csvFile) throw new Error("Missing #csvFile in HTML");
+  if (!els.grid) throw new Error("Missing #grid in HTML");
 
-// Auto-load showcase mode on refresh if sessionStorage has saved data
+  els.buildBtn.addEventListener("click", () => {
+    handleBuildClick().catch(e => setStatus(String(e?.message || e)));
+  });
+  els.resetBtn?.addEventListener("click", handleResetClick);
+  els.backBtn?.addEventListener("click", handleBackClick);
+
+  console.log("[Top25] events wired");
+}
+
 (async function init() {
-  const saved = loadShowcase();
-  if (saved?.length) {
-    try {
+  try {
+    wireEvents();
+    setStatus("JS loaded. Upload CSV and click Build Showcase.");
+    const saved = loadShowcase();
+    if (saved?.length) {
       await buildShowcase(saved);
-    } catch (e) {
+    } else {
       setMode("import");
-      setStatus(String(e?.message || e));
     }
-  } else {
-    setMode("import");
+  } catch (e) {
+    console.error("[Top25] init error:", e);
+    setStatus(`JS error: ${String(e?.message || e)}`);
   }
 })();
