@@ -1,15 +1,13 @@
 const els = {
   csvFile: document.getElementById("csvFile"),
-  csvText: document.getElementById("csvText"),
   renderBtn: document.getElementById("renderBtn"),
   clearBtn: document.getElementById("clearBtn"),
   status: document.getElementById("status"),
+  importCard: document.getElementById("importCard"),
+  importHeader: document.getElementById("importHeader"),
+  showcase: document.getElementById("showcase"),
   grid: document.getElementById("grid"),
-  playerWrap: document.getElementById("playerWrap"),
-  player: document.getElementById("player"),
-  closePlayerBtn: document.getElementById("closePlayerBtn"),
-  playerTitle: document.getElementById("playerTitle"),
-  playerSub: document.getElementById("playerSub"),
+  audio: document.getElementById("audio"),
 };
 
 function setStatus(msg) {
@@ -25,16 +23,9 @@ function readFileAsText(file) {
   });
 }
 
-/**
- * Minimal CSV parser:
- * - Handles quoted cells
- * - Splits on commas/newlines
- * - Returns array of rows (array of cells)
- */
+// CSV parser (quoted fields supported)
 function parseCSV(text) {
-  // Strip UTF-8 BOM if present
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-
   const rows = [];
   let row = [];
   let cell = "";
@@ -44,236 +35,298 @@ function parseCSV(text) {
     const ch = text[i];
     const next = text[i + 1];
 
-    if (ch === '"' && inQuotes && next === '"') {
-      cell += '"'; // escaped quote
-      i++;
-      continue;
-    }
+    if (ch === '"' && inQuotes && next === '"') { cell += '"'; i++; continue; }
+    if (ch === '"') { inQuotes = !inQuotes; continue; }
 
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (ch === "," && !inQuotes) {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
+    if (ch === "," && !inQuotes) { row.push(cell); cell = ""; continue; }
 
     if ((ch === "\n" || ch === "\r") && !inQuotes) {
-      if (ch === "\r" && next === "\n") i++; // consume CRLF
-      row.push(cell);
-      cell = "";
-
+      if (ch === "\r" && next === "\n") i++;
+      row.push(cell); cell = "";
       if (row.some(c => c.trim() !== "")) rows.push(row);
       row = [];
       continue;
     }
-
     cell += ch;
   }
-
   row.push(cell);
   if (row.some(c => c.trim() !== "")) rows.push(row);
-
   return rows;
 }
 
-function parseTrackIdFromSpotifyUriOrUrl(value) {
-  const s = (value || "").trim();
-  if (!s) return null;
-
-  // spotify:track:<id>
-  const uri = s.match(/^spotify:track:([a-zA-Z0-9]+)$/);
-  if (uri) return uri[1];
-
-  // https://open.spotify.com/track/<id>
-  try {
-    const u = new URL(s);
-    if (u.hostname.includes("spotify.com")) {
-      const parts = u.pathname.split("/").filter(Boolean);
-      const idx = parts.indexOf("track");
-      if (idx !== -1 && parts[idx + 1]) return parts[idx + 1];
-    }
-  } catch {
-    // not a URL
-  }
-
-  return null;
-}
-
-function extractTop25TrackIdsFromYourCSV(csvText) {
+function extractTop25QueriesFromYourCSV(csvText) {
   const rows = parseCSV(csvText);
   if (!rows.length) return [];
 
   const header = rows[0].map(h => (h || "").trim().toLowerCase());
 
-  // Your CSV uses "Track URI"
-  const trackUriIdx = header.indexOf("track uri");
-  if (trackUriIdx === -1) {
-    // fallback: try common variants
-    const fallbackIdx =
-      header.indexOf("track_uri") !== -1 ? header.indexOf("track_uri")
-      : header.indexOf("uri") !== -1 ? header.indexOf("uri")
-      : -1;
+  // Your CSV columns
+  const trackNameIdx = header.indexOf("track name");
+  const artistIdx = header.indexOf("artist name(s)");
+  const albumIdx = header.indexOf("album name");
 
-    if (fallbackIdx === -1) return [];
-    return extractByIndex(rows, fallbackIdx);
-  }
+  if (trackNameIdx === -1 || artistIdx === -1) return [];
 
-  return extractByIndex(rows, trackUriIdx);
+  const out = [];
+  for (let r = 1; r < rows.length; r++) {
+    const cells = rows[r];
+    const track = (cells[trackNameIdx] || "").trim();
+    const artist = (cells[artistIdx] || "").trim();
+    const album = albumIdx !== -1 ? (cells[albumIdx] || "").trim() : "";
 
-  function extractByIndex(allRows, idx) {
-    const ids = [];
-    for (let r = 1; r < allRows.length; r++) {
-      const cells = allRows[r];
-      const id = parseTrackIdFromSpotifyUriOrUrl(cells[idx]);
-      if (id) ids.push(id);
+    if (track && artist) {
+      out.push({ track, artist, album });
     }
-    // Dedup preserve order
-    const seen = new Set();
-    const unique = [];
-    for (const id of ids) {
-      if (!seen.has(id)) {
-        seen.add(id);
-        unique.push(id);
-      }
-    }
-    return unique.slice(0, 25);
   }
+  return out.slice(0, 25);
 }
 
-function trackUrl(trackId) {
-  return `https://open.spotify.com/track/${trackId}`;
-}
+// iTunes Search API (no auth)
+async function lookupITunes({ track, artist }) {
+  const term = `${track} ${artist}`;
+  const url =
+    `https://itunes.apple.com/search?` +
+    `term=${encodeURIComponent(term)}&entity=song&limit=5`;
 
-function embedUrl(trackId) {
-  return `https://open.spotify.com/embed/track/${trackId}`;
-}
-
-// Public oEmbed (no login/dev app). Pulls artwork thumbnail + title/author.
-async function fetchOEmbed(trackId) {
-  const cacheKey = `oembed_${trackId}`;
-  const cached = sessionStorage.getItem(cacheKey);
-  if (cached) return JSON.parse(cached);
-
-  const url = `https://open.spotify.com/oembed?url=${encodeURIComponent(trackUrl(trackId))}`;
   const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`oEmbed failed for ${trackId} (${resp.status})`);
+  if (!resp.ok) throw new Error("iTunes search failed");
   const data = await resp.json();
+  const results = data.results || [];
 
-  const out = {
-    title: data.title || "",
-    author: data.author_name || "",
-    thumbnail: data.thumbnail_url || "",
+  // Heuristic: prefer match where artist contains artist and track contains track
+  const t = track.toLowerCase();
+  const a = artist.toLowerCase();
+
+  let best = results[0] || null;
+  for (const r of results) {
+    const rt = (r.trackName || "").toLowerCase();
+    const ra = (r.artistName || "").toLowerCase();
+    if (rt.includes(t.slice(0, Math.min(10, t.length))) && ra.includes(a.split(",")[0].trim())) {
+      best = r;
+      break;
+    }
+  }
+
+  if (!best) return null;
+
+  // Upgrade artwork size (100 -> 600)
+  const artwork = (best.artworkUrl100 || "").replace("100x100bb.jpg", "600x600bb.jpg");
+
+  return {
+    trackName: best.trackName || track,
+    artistName: best.artistName || artist,
+    artworkUrl: artwork || best.artworkUrl100 || "",
+    previewUrl: best.previewUrl || null,
   };
-
-  sessionStorage.setItem(cacheKey, JSON.stringify(out));
-  return out;
 }
 
-function placeholderSvg(label) {
-  return `data:image/svg+xml;utf8,${encodeURIComponent(`
-    <svg xmlns="http://www.w3.org/2000/svg" width="600" height="600">
-      <defs>
-        <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0" stop-color="#0e0e14"/>
-          <stop offset="1" stop-color="#1a1a2a"/>
-        </linearGradient>
-      </defs>
-      <rect width="600" height="600" fill="url(#g)"/>
-      <circle cx="300" cy="300" r="170" fill="none" stroke="#1db954" stroke-width="16" opacity="0.25"/>
-      <text x="300" y="315" text-anchor="middle" font-family="Arial" font-size="44" fill="#b6b6c2" opacity="0.6">${label}</text>
-    </svg>
-  `)}`;
+// Compute luminance for hover overlay style
+async function computeLuminance(imgEl) {
+  const w = 32, h = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(imgEl, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3];
+    if (a < 10) continue;
+    r += data[i]; g += data[i + 1]; b += data[i + 2];
+    n++;
+  }
+  if (!n) return 0.5;
+  r /= n; g /= n; b /= n;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
-function makeTile(n, trackId, meta) {
+// Spiral positions around center in 9x9 (center = 5,5)
+function spiralPositions(count) {
+  const positions = [];
+  let x = 5, y = 5;
+  positions.push({ x, y });
+
+  let step = 1;
+  while (positions.length < count) {
+    // right step, down step, left step+1, up step+1 ...
+    for (const [dx, dy] of [[1,0],[0,1],[-1,0],[0,-1]]) {
+      const moves = step;
+      for (let i = 0; i < moves; i++) {
+        if (positions.length >= count) break;
+        x += dx; y += dy;
+        if (x >= 1 && x <= 9 && y >= 1 && y <= 9) positions.push({ x, y });
+      }
+      if (dx === 0 && dy === 1) step++;
+      if (dx === 0 && dy === -1) step++;
+    }
+  }
+  return positions.slice(0, count);
+}
+
+function stopAudio() {
+  els.audio.pause();
+  els.audio.src = "";
+}
+
+function playPreview(url) {
+  stopAudio();
+  els.audio.src = url;
+  els.audio.play().catch(() => {});
+}
+
+function enterShowcaseMode(queries) {
+  sessionStorage.setItem("top25_queries", JSON.stringify(queries));
+  const u = new URL(window.location.href);
+  u.searchParams.set("showcase", "1");
+  history.pushState({}, "", u.toString());
+
+  els.importCard.classList.add("hidden");
+  els.importHeader.classList.add("hidden");
+  els.showcase.classList.remove("hidden");
+}
+
+function loadSavedShowcaseQueries() {
+  const u = new URL(window.location.href);
+  if (u.searchParams.get("showcase") !== "1") return null;
+  const raw = sessionStorage.getItem("top25_queries");
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+function createTile(rank, meta, placement) {
   const tile = document.createElement("button");
   tile.className = "tile";
   tile.type = "button";
 
+  // Center tile (#1) spans 4x4, centered at (4,4)
+  if (rank === 1) {
+    tile.style.gridColumn = "4 / span 4";
+    tile.style.gridRow = "4 / span 4";
+  } else {
+    tile.style.gridColumn = `${placement.x} / span 1`;
+    tile.style.gridRow = `${placement.y} / span 1`;
+  }
+
   const img = document.createElement("img");
-  img.alt = meta?.title ? meta.title : `Track ${n}`;
-  img.src = meta?.thumbnail || placeholderSvg("SPOTIFY");
+  img.alt = meta?.trackName ? meta.trackName : `#${rank}`;
+  img.src = meta?.artworkUrl || "";
 
   const overlay = document.createElement("div");
   overlay.className = "overlay";
   const num = document.createElement("span");
-  num.textContent = String(n);
+  num.textContent = String(rank);
   overlay.appendChild(num);
 
   tile.appendChild(img);
   tile.appendChild(overlay);
 
-  tile.title = meta?.title ? `#${n} — ${meta.title}` : `#${n}`;
+  tile.title = meta?.trackName ? `#${rank} — ${meta.trackName}` : `#${rank}`;
+
+  img.addEventListener("load", async () => {
+    try {
+      const lum = await computeLuminance(img);
+      const isLight = lum > 0.55;
+      overlay.style.background = isLight ? "rgba(0,0,0,.45)" : "rgba(255,255,255,.18)";
+      num.style.color = isLight ? "rgba(255,255,255,.95)" : "rgba(10,10,14,.95)";
+      num.style.borderColor = isLight ? "rgba(255,255,255,.22)" : "rgba(0,0,0,.22)";
+    } catch {
+      overlay.style.background = "rgba(0,0,0,.55)";
+      num.style.color = "rgba(255,255,255,.95)";
+    }
+  });
 
   tile.addEventListener("click", () => {
-    els.player.src = embedUrl(trackId);
-    els.playerWrap.classList.remove("hidden");
-    els.playerTitle.textContent = meta?.title ? `Now Playing: #${n} — ${meta.title}` : `Now Playing: #${n}`;
-    els.playerSub.textContent = meta?.author ? meta.author : "Spotify embed player";
-    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    if (meta?.previewUrl) {
+      playPreview(meta.previewUrl);
+    } else {
+      // If no preview exists, do nothing (or you can open Apple Music search)
+      setStatus(`No preview available for #${rank}.`);
+    }
   });
 
   return tile;
 }
 
-async function getCSVText() {
-  const file = els.csvFile.files?.[0] || null;
-  if (file) return await readFileAsText(file);
-  return els.csvText.value || "";
+async function buildShowcase(queries) {
+  enterShowcaseMode(queries);
+  els.grid.innerHTML = "";
+  stopAudio();
+
+  // Reverse order: CSV row 25 becomes rank #1
+  const reversed = [...queries].reverse();
+
+  setStatus(`Looking up iTunes previews for ${reversed.length} tracks...`);
+
+  const metas = await Promise.all(
+    reversed.map(async (q) => {
+      try {
+        return await lookupITunes(q);
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const positions = spiralPositions(25);
+
+  for (let i = 0; i < reversed.length; i++) {
+    const rank = i + 1;
+    const meta = metas[i] || {
+      trackName: `${reversed[i].track}`,
+      artistName: `${reversed[i].artist}`,
+      artworkUrl: "",
+      previewUrl: null,
+    };
+    const placement = positions[i];
+    els.grid.appendChild(createTile(rank, meta, placement));
+  }
+
+  setStatus("");
 }
 
-async function render() {
-  setStatus("");
-  els.grid.innerHTML = "";
-  els.playerWrap.classList.add("hidden");
-  els.player.src = "";
-
-  const csvText = await getCSVText();
-  if (!csvText.trim()) {
-    setStatus("Upload your CSV (like 25_of_25.csv) or paste its contents first.");
+async function handleBuild() {
+  const file = els.csvFile.files?.[0];
+  if (!file) {
+    setStatus("Upload your CSV first.");
     return;
   }
 
-  const ids = extractTop25TrackIdsFromYourCSV(csvText);
-  if (!ids.length) {
-    setStatus("I couldn’t find the “Track URI” column. Make sure your CSV has a header named Track URI.");
+  setStatus("Reading CSV...");
+  const text = await readFileAsText(file);
+  const queries = extractTop25QueriesFromYourCSV(text);
+
+  if (!queries.length) {
+    setStatus("Could not parse Track Name + Artist Name(s) from CSV.");
     return;
   }
 
-  setStatus(`Found ${ids.length} track IDs. Fetching album art...`);
-
-  // Fetch oEmbed in parallel (25 requests is fine)
-  const metas = await Promise.allSettled(ids.map(id => fetchOEmbed(id)));
-
-  ids.forEach((id, idx) => {
-    const n = idx + 1;
-    const res = metas[idx];
-    const meta = res.status === "fulfilled" ? res.value : { title: "", author: "", thumbnail: "" };
-    els.grid.appendChild(makeTile(n, id, meta));
-  });
-
-  setStatus(`Rendered ${ids.length} tracks. Hover to see rank; click to play in the embed player.`);
+  await buildShowcase(queries);
 }
 
 function clearAll() {
-  els.csvFile.value = "";
-  els.csvText.value = "";
-  els.grid.innerHTML = "";
-  els.playerWrap.classList.add("hidden");
-  els.player.src = "";
-  setStatus("");
+  stopAudio();
+  sessionStorage.removeItem("top25_queries");
+  const u = new URL(window.location.href);
+  u.searchParams.delete("showcase");
+  history.pushState({}, "", u.toString());
+  location.reload();
 }
 
 els.renderBtn.addEventListener("click", () => {
-  render().catch(e => setStatus(String(e?.message || e)));
+  handleBuild().catch(e => setStatus(String(e?.message || e)));
 });
 els.clearBtn.addEventListener("click", clearAll);
-els.closePlayerBtn.addEventListener("click", () => {
-  els.playerWrap.classList.add("hidden");
-  els.player.src = "";
-});
 
+// Auto-load if in showcase mode
+(async function init() {
+  const saved = loadSavedShowcaseQueries();
+  if (saved?.length) {
+    try {
+      await buildShowcase(saved);
+    } catch (e) {
+      setStatus(String(e?.message || e));
+    }
+  }
+})();
