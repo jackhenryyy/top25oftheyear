@@ -1,4 +1,3 @@
-/* ===== Base ===== */
 :root{
   --bg: #f5f5f2;
   --ink: #111;
@@ -6,6 +5,10 @@
   --panel: #ffffff;
   --line: #111;
   --shadow: 0 10px 40px rgba(0,0,0,.18);
+
+  --tile: 92px;      /* default tile size */
+  --gap: 10px;
+  --hero: 220px;     /* rank #1 size */
 }
 
 *{ box-sizing:border-box; }
@@ -19,30 +22,12 @@ body{
 
 .hidden{ display:none !important; }
 
-.header{
-  padding: 22px 16px 10px;
-}
-.headerInner{
-  max-width: 980px;
-  margin: 0 auto;
-}
-h1{
-  margin: 0;
-  font-size: 28px;
-  letter-spacing: .3px;
-}
-.sub{
-  margin: 8px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-}
+.header{ padding: 22px 16px 10px; }
+.headerInner{ max-width: 980px; margin: 0 auto; }
+h1{ margin: 0; font-size: 28px; letter-spacing: .3px; }
+.sub{ margin: 8px 0 0; color: var(--muted); font-size: 13px; }
 
-/* ===== Main / Card ===== */
-.main{
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 8px 16px 40px;
-}
+.main{ max-width: 980px; margin: 0 auto; padding: 8px 16px 40px; }
 
 .card{
   background: var(--panel);
@@ -70,10 +55,7 @@ h1{
 .status{ margin-top: 10px; font-size: 12px; color: var(--muted); }
 .hint{ margin-top: 10px; font-size: 12px; color: var(--muted); }
 
-/* ===== Showcase ===== */
-.showcase{
-  padding-top: 10px;
-}
+.showcase{ padding-top: 10px; }
 
 .topBar{
   display:flex;
@@ -104,7 +86,6 @@ h1{
 .topBarLeft{ display:flex; align-items:center; gap: 8px; }
 .topBarRight{ display:flex; gap: 10px; flex-wrap:wrap; }
 
-/* ===== Mosaic wrapper ===== */
 .mosaicWrap{
   background: #fff;
   border: 2px solid var(--line);
@@ -113,27 +94,40 @@ h1{
   min-height: 70vh;
 }
 
-/* This is the centered collage grid */
-.mosaic{
-  width: min(520px, 100%);
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  grid-auto-rows: 72px;
-  gap: 10px;
+/* ===== Pyramid layout ===== */
+.pyramid{
+  width: 100%;
+  display:flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap);
+}
+
+/* Each row is centered, grows in count */
+.pyrRow{
+  display:flex;
   justify-content: center;
-  align-content: start;
+  gap: var(--gap);
+  width: 100%;
 }
 
 /* ===== Tiles ===== */
 .tile{
   position: relative;
+  width: var(--tile);
+  height: var(--tile);
   border: 2px solid var(--line);
   background: #fff;
   overflow: hidden;
   cursor: pointer;
   box-shadow: 0 10px 22px rgba(0,0,0,.18);
-  border-radius: 0; /* hard square */
+  border-radius: 0; /* square */
+  flex: 0 0 auto;
+}
+
+.tile.hero{
+  width: var(--hero);
+  height: var(--hero);
 }
 
 .tile img{
@@ -143,16 +137,16 @@ h1{
   display:block;
 }
 
-/* Full-tile number overlay */
+/* Full-cover number overlay */
 .tile .overlay{
   position:absolute;
   inset:0;
   display:flex;
   align-items:center;
   justify-content:center;
-  background: rgba(255,255,255,.0);
   opacity: 0;
   transition: opacity .12s ease, background .12s ease;
+  background: rgba(255,255,255,.0);
 }
 
 .tile .overlay span{
@@ -160,12 +154,11 @@ h1{
   font-weight: 900;
   letter-spacing: .8px;
   color: #111;
-  text-shadow: none;
 }
 
 .tile:hover .overlay{
   opacity: 1;
-  background: rgba(255,255,255,.55);
+  background: rgba(255,255,255,.60);
 }
 
 .tile.playing{
@@ -173,47 +166,15 @@ h1{
   outline-offset: 2px;
 }
 
-/* ===== Size rules to match your mockup vibe =====
-   Using 6 columns total.
-   small  = 2x2
-   medium = 3x3
-   hero   = 6x6
-*/
-.size-small  { grid-column: span 2; grid-row: span 2; }
-.size-medium { grid-column: span 3; grid-row: span 3; }
-.size-hero   { grid-column: span 6; grid-row: span 6; }
-
-/* ===== Placement (first 11 tiles) =====
-   Layout order:
-   Row 1: 3 small (2,3,4)
-   Row 2: 2 medium (5,6)
-   Row 3: hero (1)
-   Row 4: 2 medium (7,8)
-   Row 5: 3 small (9,10,11)
-*/
-.pos-2  { grid-column: 1 / span 2; grid-row: 1 / span 2; }
-.pos-3  { grid-column: 3 / span 2; grid-row: 1 / span 2; }
-.pos-4  { grid-column: 5 / span 2; grid-row: 1 / span 2; }
-
-.pos-5  { grid-column: 1 / span 3; grid-row: 3 / span 3; }
-.pos-6  { grid-column: 4 / span 3; grid-row: 3 / span 3; }
-
-.pos-1  { grid-column: 1 / span 6; grid-row: 6 / span 6; }
-
-.pos-7  { grid-column: 1 / span 3; grid-row: 12 / span 3; }
-.pos-8  { grid-column: 4 / span 3; grid-row: 12 / span 3; }
-
-.pos-9  { grid-column: 1 / span 2; grid-row: 15 / span 2; }
-.pos-10 { grid-column: 3 / span 2; grid-row: 15 / span 2; }
-.pos-11 { grid-column: 5 / span 2; grid-row: 15 / span 2; }
-
-/* Remaining tiles (12–25) flow naturally under the collage */
-.restFlow{
-  grid-column: span 2;
-  grid-row: span 2;
+/* Responsive sizing */
+@media (max-width: 900px){
+  :root{ --tile: 84px; --hero: 200px; }
+}
+@media (max-width: 560px){
+  :root{ --tile: 72px; --hero: 170px; --gap: 8px; }
 }
 
-/* ===== Toast ===== */
+/* Toast */
 .toast{
   position: fixed;
   left: 50%;
@@ -226,7 +187,7 @@ h1{
   box-shadow: var(--shadow);
 }
 
-/* ===== Modal ===== */
+/* Modal */
 .modal{
   position: fixed;
   inset: 0;
