@@ -6,6 +6,10 @@
   --border:#222233;
   --shadow: 0 10px 30px rgba(0,0,0,.35);
   --radius: 16px;
+
+  --gold: #d7b24c;
+  --silver: #b9c2cf;
+  --bronze: #b5794a;
 }
 
 *{ box-sizing:border-box; }
@@ -14,13 +18,24 @@ body{
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
   background: radial-gradient(1200px 600px at 20% 0%, #151525 0%, var(--bg) 55%);
   color:var(--text);
+  min-height:100vh;
 }
 
-.header{ max-width:1100px; margin:0 auto; padding:24px 18px 10px; }
+.header{
+  padding:24px 18px 10px;
+}
+.headerInner{
+  max-width: 1200px;
+  margin: 0 auto;
+}
 h1{ margin:0 0 6px; font-size:22px; }
 .sub{ margin:0; color:var(--muted); font-size:13px; line-height:1.35; }
 
-.main{ max-width:1100px; margin:0 auto; padding:0 18px 40px; }
+.main{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 18px 32px;
+}
 
 .card{
   background: rgba(18,18,26,.92);
@@ -65,42 +80,64 @@ h1{ margin:0 0 6px; font-size:22px; }
 
 .hidden{ display:none !important; }
 
-.showcase{ margin-top:18px; }
-.showcaseTop{
+.showcase{
+  margin-top:14px;
+}
+
+/* top bar */
+.topBar{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:12px;
   margin-bottom:12px;
 }
-.showcaseTitle{
-  font-weight:900;
-  font-size:14px;
-  color:rgba(243,243,245,.9);
-  letter-spacing:.4px;
-}
-
-/* 9x9 spiderweb/spiral grid */
-.spiralGrid{
-  display:grid;
-  grid-template-columns: repeat(9, 1fr);
-  grid-template-rows: repeat(9, 1fr);
+.topBarLeft{
+  display:flex;
+  align-items:center;
   gap:10px;
-  width:min(980px, 100%);
-  margin:0 auto;
-  aspect-ratio: 1/1;
+  flex-wrap:wrap;
+}
+.topBarRight{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+.titlePill{
+  font-size:12px;
+  letter-spacing:.4px;
+  font-weight:900;
+  padding:8px 10px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background: rgba(18,18,26,.92);
+}
+.helperText{
+  color: var(--muted);
+  font-size: 12px;
 }
 
-/* Tiles */
+/* FULL-PAGE FEEL: grid is wide; it should fill the page */
+.grid{
+  width: 100%;
+  display:grid;
+  grid-auto-flow: dense;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+/* tile base */
 .tile{
   position:relative;
-  border-radius:14px;
+  border-radius:16px;
   overflow:hidden;
   border:1px solid var(--border);
   background:#0e0e14;
   cursor:pointer;
   box-shadow: 0 10px 20px rgba(0,0,0,.22);
   transition: transform .12s ease;
+  aspect-ratio: 1 / 1;
 }
 .tile:hover{ transform: translateY(-2px); }
 
@@ -124,13 +161,26 @@ h1{ margin:0 0 6px; font-size:22px; }
 .tile:hover .overlay{ opacity:1; }
 
 .overlay span{
-  font-size:52px;
+  font-size:48px;
   font-weight:950;
   letter-spacing:1px;
   padding:10px 18px;
   border-radius:999px;
   border: 1px solid rgba(255,255,255,.18);
 }
+
+/* Rank styling: top 3 borders */
+.rank-1{ border: 3px solid var(--gold); }
+.rank-2{ border: 3px solid var(--silver); }
+.rank-3{ border: 3px solid var(--bronze); }
+
+/* Optional size hierarchy so #1 feels “bigger” without being hidden */
+.rank-1{ grid-column: span 2; grid-row: span 2; }
+.rank-2{ grid-column: span 2; grid-row: span 1; }
+.rank-3{ grid-column: span 1; grid-row: span 2; }
+
+/* ensure big tiles appear above neighbors */
+.rank-1, .rank-2, .rank-3{ z-index: 2; }
 
 /* Toast */
 .toast{
