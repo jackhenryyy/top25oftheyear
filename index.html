@@ -29,7 +29,7 @@
 
         <div id="status" class="status"></div>
         <div class="hint">
-          Uses iTunes 30-second previews for autoplay (no Spotify developer app needed).
+          Uses iTunes previews for playback (no Spotify developer access needed).
         </div>
       </section>
 
@@ -38,7 +38,7 @@
         <div class="topBar">
           <div class="topBarLeft">
             <div class="titlePill">Top 25</div>
-            <div class="helperText">Click a cover to play. Click it again to stop.</div>
+            <div class="helperText">Click to play/stop. Shift+Click (or right-click) a tile to fix it.</div>
           </div>
 
           <div class="topBarRight">
@@ -47,13 +47,36 @@
           </div>
         </div>
 
-        <div id="grid" class="grid"></div>
+        <!-- Floating stage -->
+        <div id="stage" class="stage"></div>
 
         <div id="toast" class="toast hidden"></div>
       </section>
     </main>
 
+    <!-- Hidden audio -->
     <audio id="audio" preload="none"></audio>
+
+    <!-- Fix modal -->
+    <div id="fixModal" class="modal hidden" aria-hidden="true">
+      <div class="modalCard">
+        <div class="modalTop">
+          <div class="modalTitle" id="fixTitle">Fix Track</div>
+          <button id="closeFixBtn" class="xBtn" type="button">✕</button>
+        </div>
+
+        <div class="modalBody">
+          <div class="modalRow">
+            <input id="fixQuery" class="modalInput" placeholder="Search iTunes… (track + artist)" />
+            <button id="fixSearchBtn" class="btn">Search</button>
+          </div>
+
+          <div class="modalHint" id="fixHint"></div>
+          <div id="fixResults" class="results"></div>
+        </div>
+      </div>
+    </div>
+
     <script src="./app.js"></script>
   </body>
 </html>
