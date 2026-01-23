@@ -8,6 +8,7 @@ const els = {
   resetBtn: $("resetBtn"),
   backBtn: $("backBtn"),
   copyLinkBtn: $("copyLinkBtn"),
+  downloadArtBtn: $("downloadArtBtn"),
   status: $("status"),
   importHeader: $("importHeader"),
   importCard: $("importCard"),
@@ -94,6 +95,90 @@ function loadSession() {
 }
 function clearSession() {
   sessionStorage.removeItem(STORAGE_KEY);
+}
+
+// ---------- NEW: Batch download album art ----------
+function sanitizeFileName(name) {
+  return String(name || "")
+    .replace(/[\/\\?%*:|"<>]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 90);
+}
+
+function blobToDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+async function fetchAsBlob(url) {
+  const resp = await fetch(url, { mode: "cors" });
+  if (!resp.ok) throw new Error(`Failed fetch (${resp.status})`);
+  return await resp.blob();
+}
+
+async function downloadAlbumArtZip() {
+  if (!window.JSZip) {
+    showToast("JSZip failed to load. Refresh and try again.");
+    return;
+  }
+  if (!tracks?.length) {
+    showToast("No tracks loaded yet.");
+    return;
+  }
+
+  // Only those with artwork
+  const items = tracks
+    .map((t, i) => ({ rank: i + 1, ...t }))
+    .filter(t => t.artworkUrl);
+
+  if (!items.length) {
+    showToast("No artwork URLs found.");
+    return;
+  }
+
+  els.downloadArtBtn.disabled = true;
+  els.downloadArtBtn.textContent = "Downloading…";
+  showToast("Downloading album art…");
+
+  const zip = new JSZip();
+
+  // Fetch sequentially to avoid hammering / being blocked
+  let ok = 0;
+  for (let i = 0; i < items.length; i++) {
+    const t = items[i];
+    try {
+      const blob = await fetchAsBlob(t.artworkUrl);
+      const ext = (blob.type && blob.type.includes("png")) ? "png" : "jpg";
+
+      const fileBase =
+        `${String(t.rank).padStart(2, "0")}` +
+        ` - ${sanitizeFileName(t.artistName || "Unknown Artist")}` +
+        ` - ${sanitizeFileName(t.trackName || "Unknown Track")}`;
+
+      zip.file(`${fileBase}.${ext}`, blob);
+      ok++;
+      setStatus(`Album art: ${ok}/${items.length}`);
+    } catch (e) {
+      console.warn("[Top25] art download failed:", t.rank, t.artworkUrl, e);
+    }
+  }
+
+  setStatus("");
+  showToast(`Zipping ${ok}/${items.length} images…`);
+
+  const zipBlob = await zip.generateAsync({ type: "blob" });
+  blobToDownload(zipBlob, "top-25-album-art.zip");
+
+  els.downloadArtBtn.disabled = false;
+  els.downloadArtBtn.textContent = "Download Album Art (ZIP)";
+  showToast("ZIP downloaded.");
 }
 
 // ---------- CSV ----------
@@ -409,15 +494,12 @@ function stepPhysics() {
   const centerPull = 0.00025;
 
   for (const b of bubbles) {
-    // gentle drift
     b.vx += (Math.random() - 0.5) * wander;
     b.vy += (Math.random() - 0.5) * wander;
 
-    // barely keep things from drifting off forever
     b.vx += (W/2 - b.x) * centerPull;
     b.vy += (H/2 - b.y) * centerPull;
 
-    // gentle cursor repel
     if (cursor.active) {
       const dx = b.x - cursor.x;
       const dy = b.y - cursor.y;
@@ -429,11 +511,9 @@ function stepPhysics() {
       }
     }
 
-    // damping to smooth
     b.vx *= damping;
     b.vy *= damping;
 
-    // speed limit to prevent zipping
     const maxSpeed = 1.1;
     const sp = Math.sqrt(b.vx*b.vx + b.vy*b.vy) || 0;
     if (sp > maxSpeed) {
@@ -442,7 +522,6 @@ function stepPhysics() {
     }
   }
 
-  // mild repulsion (avoid pile-ups, but not violent)
   for (let i = 0; i < bubbles.length; i++) {
     for (let j = i + 1; j < bubbles.length; j++) {
       const a = bubbles[i];
@@ -465,7 +544,6 @@ function stepPhysics() {
     }
   }
 
-  // integrate + bounds bounce
   for (const b of bubbles) {
     b.x += b.vx;
     b.y += b.vy;
@@ -491,7 +569,7 @@ function stopPhysics() {
   rafId = null;
 }
 
-// ---------- Fix modal: paste iTunes link or ID ----------
+// ---------- Fix modal ----------
 function extractTrackId(input) {
   const s = String(input || "").trim();
   if (!s) return null;
@@ -607,7 +685,6 @@ async function buildShowcase(queries) {
   stopPhysics();
   els.stage.innerHTML = "";
 
-  // rank #1 = playlist #25
   const reversed = [...queries].reverse();
   queriesSession = queries;
 
@@ -697,9 +774,16 @@ function wireEvents() {
     }
   });
 
+  els.downloadArtBtn.addEventListener("click", async () => {
+    try {
+      await downloadAlbumArtZip();
+    } catch {
+      showToast("Album art download failed.");
+    }
+  });
+
   els.audio.addEventListener("ended", () => stopAudio());
 
-  // modal
   els.closeFixBtn.addEventListener("click", closeFixModal);
   els.fixModal.addEventListener("click", (e) => {
     if (e.target === els.fixModal) closeFixModal();
@@ -722,7 +806,6 @@ function wireEvents() {
 (async function init() {
   wireEvents();
 
-  // Share link load (short)
   const idsFromHash = decodeIdsFromHash();
   if (idsFromHash?.length) {
     setMode("showcase");
@@ -753,7 +836,6 @@ function wireEvents() {
     return;
   }
 
-  // session restore
   const saved = loadSession();
   if (saved?.length) {
     setStatus("");
