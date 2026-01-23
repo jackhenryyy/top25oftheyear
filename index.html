@@ -7,64 +7,30 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="header">
+    <header class="header" id="importHeader">
       <div>
         <h1>Top 25 Playlist Showcase</h1>
-        <p class="sub">
-          Upload a CSV export of a Spotify playlist (or paste CSV text). We’ll render the first 25 tracks in order.
-        </p>
+        <p class="sub">Upload your CSV to generate a clean showcase view.</p>
       </div>
     </header>
 
     <main class="main">
-      <section class="card">
-        <div class="controls">
-          <div class="control">
-            <label class="label" for="csvFile">Upload CSV</label>
-            <input id="csvFile" class="file" type="file" accept=".csv,text/csv" />
-          </div>
-
-          <div class="control">
-            <label class="label" for="csvText">Or paste CSV</label>
-            <textarea id="csvText" class="textarea" rows="8" placeholder="Paste CSV content here..."></textarea>
-          </div>
-
-          <div class="row">
-            <button id="renderBtn" class="btn">Render Top 25</button>
-            <button id="clearBtn" class="btn btn--ghost">Clear</button>
-          </div>
-
-          <div id="status" class="status"></div>
+      <section class="card" id="importCard">
+        <label class="label" for="csvFile">Upload CSV</label>
+        <input id="csvFile" class="file" type="file" accept=".csv,text/csv" />
+        <div class="row">
+          <button id="renderBtn" class="btn">Build Showcase</button>
+          <button id="clearBtn" class="btn btn--ghost">Clear</button>
         </div>
+        <div id="status" class="status"></div>
       </section>
 
-      <section class="gridWrap">
-        <div id="grid" class="grid"></div>
-      </section>
-
-      <section class="playerWrap card hidden" id="playerWrap">
-        <div class="playerHeader">
-          <div>
-            <div class="playerTitle" id="playerTitle">Now Playing</div>
-            <div class="playerSub" id="playerSub">Click a tile to load the Spotify player.</div>
-          </div>
-          <button id="closePlayerBtn" class="btn btn--ghost">Close</button>
-        </div>
-        <div class="playerBox">
-          <iframe
-            id="player"
-            title="Spotify Player"
-            width="100%"
-            height="152"
-            frameborder="0"
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"
-          ></iframe>
-        </div>
+      <section class="showcase hidden" id="showcase">
+        <div id="grid" class="spiralGrid"></div>
       </section>
     </main>
 
+    <audio id="audio" preload="none"></audio>
     <script src="./app.js"></script>
   </body>
 </html>
-
