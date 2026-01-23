@@ -1,274 +1,272 @@
+/* ===== Base ===== */
 :root{
   --bg: #f5f5f2;
+  --ink: #111;
+  --muted: rgba(0,0,0,.55);
   --panel: #ffffff;
-  --ink: #111111;
-  --muted: #666666;
-  --border: #111111;
-
-  --gold: #d7b24c;
-  --silver: #b9c2cf;
-  --bronze: #b5794a;
+  --line: #111;
+  --shadow: 0 10px 40px rgba(0,0,0,.18);
 }
 
 *{ box-sizing:border-box; }
-
+html, body{ height:100%; }
 body{
   margin:0;
-  color:var(--ink);
   background: var(--bg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  min-height:100vh;
+  color: var(--ink);
+  font-family: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
+.hidden{ display:none !important; }
+
 .header{
-  padding: 18px 18px 10px;
-  border-bottom: 1px solid rgba(0,0,0,.08);
-  background: var(--bg);
+  padding: 22px 16px 10px;
 }
 .headerInner{
-  width: 100%;
+  max-width: 980px;
   margin: 0 auto;
 }
 h1{
-  margin:0 0 6px;
-  font-size: 18px;
-  letter-spacing: .2px;
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: .3px;
 }
 .sub{
-  margin:0;
-  color:var(--muted);
-  font-size: 12px;
-  line-height:1.35;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
+/* ===== Main / Card ===== */
 .main{
-  width: 100%;
+  max-width: 980px;
   margin: 0 auto;
-  padding: 14px 18px 18px;
-}
-
-.main--full{
-  max-width: none;
+  padding: 8px 16px 40px;
 }
 
 .card{
   background: var(--panel);
-  border: 1px solid rgba(0,0,0,.18);
-  border-radius: 10px;
-  padding: 14px;
+  border: 2px solid var(--line);
+  padding: 16px;
+  box-shadow: var(--shadow);
 }
 
-.label{ display:block; color:var(--muted); font-size:12px; margin-bottom:6px; }
+.label{ display:block; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.file{ width:100%; padding: 10px; border:2px solid var(--line); background:#fff; }
 
-.file{
-  width:100%;
-  background:#fff;
-  border:1px solid rgba(0,0,0,.18);
-  color:var(--ink);
-  border-radius:10px;
-  padding:10px;
-}
-
-.row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.row{ display:flex; gap:10px; margin-top: 12px; flex-wrap:wrap; }
 
 .btn{
-  background:#fff;
-  border: 1px solid rgba(0,0,0,.35);
+  padding: 10px 14px;
+  border: 2px solid var(--line);
+  background: #fff;
   color: var(--ink);
   font-weight: 700;
-  padding: 10px 12px;
-  border-radius: 10px;
-  cursor:pointer;
+  cursor: pointer;
 }
-.btn:hover{ filter: brightness(.98); }
+.btn:active{ transform: translateY(1px); }
+.btn--ghost{ background: transparent; }
 
-.btn--ghost{
-  background: transparent;
-  border: 1px solid rgba(0,0,0,.20);
-  color: var(--ink);
-  font-weight: 700;
-}
+.status{ margin-top: 10px; font-size: 12px; color: var(--muted); }
+.hint{ margin-top: 10px; font-size: 12px; color: var(--muted); }
 
-.status{ margin-top:10px; font-size:12px; color:var(--muted); }
-.hint{ margin-top:10px; font-size:12px; color:var(--muted); }
-
-.hidden{ display:none !important; }
-
-/* UI sits above full-page stage */
+/* ===== Showcase ===== */
 .showcase{
-  position: relative;
-  z-index: 2;
+  padding-top: 10px;
 }
 
 .topBar{
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  background: var(--bg);
-  padding: 14px 18px 10px;
-  margin: 0 -18px 10px;
-  border-bottom: 1px solid rgba(0,0,0,.08);
-
   display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-}
-
-.topBarLeft{
-  display:flex;
-  align-items:center;
-  gap:12px;
-  flex-wrap:wrap;
-}
-.topBarRight{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  justify-content:flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0 14px;
 }
 
 .titlePill{
-  font-size: 12px;
-  font-weight: 800;
-  padding: 8px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(0,0,0,.25);
-  background: #fff;
+  display:inline-flex;
+  align-items:center;
+  padding: 6px 10px;
+  border: 2px solid var(--line);
+  background:#fff;
+  font-weight: 900;
+  letter-spacing: .4px;
 }
+
 .helperText{
-  color: var(--muted);
+  display:inline-block;
+  margin-left: 10px;
   font-size: 12px;
+  color: var(--muted);
+  vertical-align: middle;
 }
 
-/* FULL-PAGE STAGE (no visible box) */
-.stage{
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  background: var(--bg);
-  overflow: hidden;
-  z-index: 0;
-}
+.topBarLeft{ display:flex; align-items:center; gap: 8px; }
+.topBarRight{ display:flex; gap: 10px; flex-wrap:wrap; }
 
-/* square cards w/ hard black border */
-.bubble{
-  position:absolute;
-  border-radius: 0px;
-  overflow:hidden;
-  cursor:pointer;
-  user-select:none;
-  box-shadow: none;
-  border: 2px solid #111;
+/* ===== Mosaic wrapper ===== */
+.mosaicWrap{
   background: #fff;
-  transform: translateZ(0);
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 22px 14px 26px;
+  min-height: 70vh;
 }
 
-.bubble img{
-  width:100%;
-  height:100%;
-  object-fit:cover;
+/* This is the centered collage grid */
+.mosaic{
+  width: min(520px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-auto-rows: 72px;
+  gap: 10px;
+  justify-content: center;
+  align-content: start;
+}
+
+/* ===== Tiles ===== */
+.tile{
+  position: relative;
+  border: 2px solid var(--line);
+  background: #fff;
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(0,0,0,.18);
+  border-radius: 0; /* hard square */
+}
+
+.tile img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   display:block;
 }
 
-/* Full overlay number */
-.bubble .overlay{
+/* Full-tile number overlay */
+.tile .overlay{
   position:absolute;
   inset:0;
   display:flex;
   align-items:center;
   justify-content:center;
+  background: rgba(255,255,255,.0);
   opacity: 0;
-  transition: opacity .14s ease;
+  transition: opacity .12s ease, background .12s ease;
+}
+
+.tile .overlay span{
+  font-size: 44px;
+  font-weight: 900;
+  letter-spacing: .8px;
+  color: #111;
+  text-shadow: none;
+}
+
+.tile:hover .overlay{
+  opacity: 1;
   background: rgba(255,255,255,.55);
 }
-.bubble:hover .overlay{ opacity: 1; }
 
-.bubble .overlay span{
-  font-size: 96px;
-  font-weight: 900;
-  line-height: 1;
-  color: #111;
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-/* top 3: hard border + inset color treatment */
-.rank-1{ border-color: #111; box-shadow: inset 0 0 0 6px var(--gold); }
-.rank-2{ border-color: #111; box-shadow: inset 0 0 0 6px var(--silver); }
-.rank-3{ border-color: #111; box-shadow: inset 0 0 0 6px var(--bronze); }
-
-.playing{
-  outline: 3px solid rgba(17,17,17,.55);
+.tile.playing{
+  outline: 3px solid #111;
   outline-offset: 2px;
 }
 
-/* Toast */
+/* ===== Size rules to match your mockup vibe =====
+   Using 6 columns total.
+   small  = 2x2
+   medium = 3x3
+   hero   = 6x6
+*/
+.size-small  { grid-column: span 2; grid-row: span 2; }
+.size-medium { grid-column: span 3; grid-row: span 3; }
+.size-hero   { grid-column: span 6; grid-row: span 6; }
+
+/* ===== Placement (first 11 tiles) =====
+   Layout order:
+   Row 1: 3 small (2,3,4)
+   Row 2: 2 medium (5,6)
+   Row 3: hero (1)
+   Row 4: 2 medium (7,8)
+   Row 5: 3 small (9,10,11)
+*/
+.pos-2  { grid-column: 1 / span 2; grid-row: 1 / span 2; }
+.pos-3  { grid-column: 3 / span 2; grid-row: 1 / span 2; }
+.pos-4  { grid-column: 5 / span 2; grid-row: 1 / span 2; }
+
+.pos-5  { grid-column: 1 / span 3; grid-row: 3 / span 3; }
+.pos-6  { grid-column: 4 / span 3; grid-row: 3 / span 3; }
+
+.pos-1  { grid-column: 1 / span 6; grid-row: 6 / span 6; }
+
+.pos-7  { grid-column: 1 / span 3; grid-row: 12 / span 3; }
+.pos-8  { grid-column: 4 / span 3; grid-row: 12 / span 3; }
+
+.pos-9  { grid-column: 1 / span 2; grid-row: 15 / span 2; }
+.pos-10 { grid-column: 3 / span 2; grid-row: 15 / span 2; }
+.pos-11 { grid-column: 5 / span 2; grid-row: 15 / span 2; }
+
+/* Remaining tiles (12–25) flow naturally under the collage */
+.restFlow{
+  grid-column: span 2;
+  grid-row: span 2;
+}
+
+/* ===== Toast ===== */
 .toast{
   position: fixed;
   left: 50%;
   bottom: 18px;
   transform: translateX(-50%);
   background: #fff;
-  border: 2px solid #111;
-  border-radius: 0px;
+  border: 2px solid var(--line);
   padding: 10px 12px;
   font-size: 12px;
-  color: var(--ink);
-  max-width: min(92vw, 900px);
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-  z-index: 4;
+  box-shadow: var(--shadow);
 }
 
-/* Modal (Shelf-style: sharp edges, black border) */
+/* ===== Modal ===== */
 .modal{
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,.30);
+  background: rgba(0,0,0,.35);
   display:flex;
   align-items:center;
   justify-content:center;
-  padding: 16px;
+  padding: 18px;
   z-index: 1000;
 }
 .modalCard{
   width: min(720px, 96vw);
-  background: #fff;
-  border: 2px solid #111;
-  border-radius: 0px;
-  overflow: hidden;
+  background:#fff;
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow);
 }
 .modalTop{
   display:flex;
   align-items:center;
   justify-content:space-between;
   padding: 12px 12px;
-  border-bottom: 1px solid rgba(0,0,0,.15);
+  border-bottom: 2px solid var(--line);
 }
-.modalTitle{ font-weight: 900; font-size: 13px; }
+.modalTitle{ font-weight: 900; }
 .xBtn{
-  background: transparent;
-  border: 2px solid #111;
-  color: var(--ink);
-  border-radius: 0px;
-  padding: 6px 10px;
+  border: 2px solid var(--line);
+  background:#fff;
+  width: 38px;
+  height: 34px;
   cursor:pointer;
 }
 .modalBody{ padding: 12px; }
-
-.modalRow{ display:flex; gap:10px; flex-wrap:wrap; }
+.modalRow{ display:flex; gap: 10px; }
 .modalInput{
   flex: 1;
-  min-width: 260px;
-  border-radius: 0px;
-  border: 2px solid #111;
-  background: #fff;
-  padding: 10px 10px;
-  color: var(--ink);
+  padding: 10px;
+  border: 2px solid var(--line);
 }
-
-.modalHint{ margin-top:10px; font-size: 12px; color: var(--muted); }
+.modalHint{
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
